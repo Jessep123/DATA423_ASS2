@@ -38,7 +38,7 @@ shinyUI(
                    "missing_threshold",
                    "Missing Values per Row Threshold",
                    min = 0,
-                   max = ncol(data),
+                   max = 9,
                    value = 0,
                    step = 1
                  ),
@@ -333,9 +333,173 @@ shinyUI(
     ),
     
     navbarMenu("Data Processing",
+               tabPanel("Introduction"), #Fill this out with info explaining processing module
                tabPanel("Missing Values",
-                        h3("Missing Values")
-                            )
+                        layout_sidebar(
+                          sidebar = sidebar(
+                            title = "Fuck around and find out I guess",
+                            
+                            actionButton("reset_input_missing_processing","Reset Inputs"),
+                            sliderInput(
+                              "missing_threshold_processing",
+                              "Missing Values per Row Threshold",
+                              min = 0,
+                              max = 9,
+                              value = 9,
+                              step = 1
+                            ),
+                            
+                            p("Rows with # values missing above this threshold will be removed", style = "color:red;"),
+                            
+                            
+                            sliderInput(
+                              "missing_col_threshold_processing",
+                              "Variable % Missing Threshold",
+                              min = 0,
+                              max = 100,
+                              value = 100,
+                              step = 1,
+                              post = "%"
+                            ),
+                            
+                            p("Columns with % values missing above this threshold will be removed", style = "color:red;"),
+                            
+
+                            accordion(open = FALSE,
+                                      
+                                      #For selecting variables to be in dataset
+                                      accordion_panel(
+                                        "Select Variables",
+                                        select_variables_numeric_missing_processing,
+                                        select_variables_categorical_missing_processing
+                                      ),
+                                      
+                                      #For filtering variables in dataset
+                                      accordion_panel(
+                                        "Filter Categorical Variables",
+                                        uiOutput("dynamic_filters_categorical_missing_processing")
+                                                      ),
+                                      accordion_panel(
+                                        "Filter Numeric Variables",
+                                        uiOutput("dynamic_filters_numeric_missing_processing")
+                                                      )
+                                    ),
+                            
+                            actionButton("reset_filter_input_missing_processing", "Reset Filters")
+                            
+                            
+                            ),
+                        tabsetPanel( id = "missing_processing_tabs",
+                          tabPanel("Missing Values Chart",
+                                   value = "missing_plot_tab",
+                                   plotOutput("missing_data_processing", height = "600px"),
+                                   accordion( open = FALSE,
+                                     accordion_panel("Chart Controls", 
+                                         chart_console(
+                                           fluidRow(
+                                             column(4,
+                                                    checkboxInput("distinct_datatypes_missing_processing",
+                                                                  "Display Datatypes",
+                                                                  value = FALSE)
+                                             ),
+                                             column(4,
+                                                    checkboxInput("missing_order_na_row_sum_processing",
+                                                                  "Order by Missing Count",
+                                                                  value = FALSE)
+                                             ),
+                                             column(4,
+                                                    div(
+                                                      style = "display: flex; justify-content: flex-end;",
+                                                      actionButton("reset_missing_plot", "Reset Plot Adjustments")
+                                                    )
+                                                    )
+                                           )
+                                         ))
+                                   )
+                                   # DTOutput("reactive_table")
+                                   ),
+                          tabPanel("gg_miss_upset",
+                                   value = "gg_miss_tab",
+                                   
+                                   plotOutput("gg_miss"),
+                                   
+                                   accordion( open = FALSE,
+                                     accordion_panel("Chart Controls", 
+                                                     chart_console(
+                                                       fluidRow(
+                                                         column(3,
+                                                                numericInput(
+                                                                  "gg_miss_nsets",
+                                                                  "Number of Sets",
+                                                                  value = 5, 
+                                                                  min = 1, 
+                                                                  max = 10 
+                                                                            )
+                                                            
+                                                         ),
+                                                         column(3,
+                                                                numericInput(
+                                                                  "gg_miss_nintersects",
+                                                                  "Number of Intersections",
+                                                                  value = 40, 
+                                                                  min = 1, 
+                                                                  max = 100 
+                                                                            )
+                                                                  
+                                                         ),
+                                                         
+                                                         column(3,
+                                                                pickerInput(
+                                                                  inputId = "order_by_gg_miss",
+                                                                  label = "Order By",
+                                                                  choices = c("Frequency" = "freq", "Degree" = "degree", "Both"),
+                                                                  selected = "Frequency",
+                                                                  multiple = FALSE,
+                                                                  options = list(
+                                                                    `actions-box` = TRUE,
+                                                                    `live-search` = TRUE
+                                                                  )
+                                                                )
+                                                                
+                                                         ),
+                                                         column(3,
+                                                                div(
+                                                                  style = "display: flex; justify-content: flex-end;",
+                                                                  actionButton("reset_gg_miss_plot", "Reset Plot Adjustments")
+                                                                    )
+                                                         )
+                                                       )
+                                                     )
+                                               )
+                                             )
+                                   ),
+                          tabPanel("rpart",
+                                   value = "rpart_tab",
+                                   
+                                   plotOutput("rpart", height = "600px"),
+                                   
+                                   accordion(open = FALSE,
+                                     accordion_panel("Chart Controls", 
+                                                     chart_console(
+                                                       fluidRow(
+                                                         column(4,
+                                                                div(
+                                                                  style = "display: flex; justify-content: flex-end;",
+                                                                  actionButton("reset_rpart_plot", "Reset Plot Adjustments")
+                                                                )
+                                                         )
+                                                       )
+                                                     )                                  
+                                                     )
+                                   )
+                                   
+                                   ),
+                          tabPanel("Data Table",
+                                   value = "data_tab",
+                                  DTOutput("missing_processing_reactive_table")) 
+                          )   
+                        )
+                  )
                
     ),
 

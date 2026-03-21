@@ -101,12 +101,6 @@ shinyServer(function(input, output, session) {
             cat_cols
           ), use.names = FALSE)
         }
-        else if(label == "missing"){
-          # Returning date variable always for missing
-          selected_vars <-unlist(c(
-            input[[cat_id]],
-            num_cols
-          ), use.names = FALSE)}
         else if (label == "counts_over_time"){
           selected_vars <- unlist(c(
             cat_cols,
@@ -143,9 +137,55 @@ shinyServer(function(input, output, session) {
     reactive_counts_over_time <- reactive_dataset("counts_over_time") #this is the scatterplot
     reactive_corr <- reactive_dataset("corr")
     
-    #Reactive data table for checking data and testing functions
-    output$reactive_table <- renderDataTable({
-      reactive_mosaic()
+    #Processing dataset
+    reactive_missing_processing <- reactive_dataset("missing_processing")
+    
+    
+
+    #Reactive data table for checking data in processing data section
+    output$missing_processing_reactive_table <- renderDataTable({
+      processed_missing_reactive()
+    })
+    
+    
+# ================================================================================
+#       PROCESSING SECTION
+# ================================================================================
+    
+    #Reactive dataset for processing missing data
+    processed_missing_reactive <- reactive({
+      df <- reactive_missing_processing()
+      
+      #Handling Missing Values per row threshold
+      
+
+      
+      #Object for missing column proportion threshold
+      missing_col_threshold <-  input$missing_col_threshold_processing
+      
+      if(missing_col_threshold < 100){
+        #Keeping columns that have less missing values than threshold
+        df <- df[, colMeans(is.na(df)) * 100 < missing_col_threshold]
+      }
+      
+      #Calculating missing count for each row
+      df <- df %>%
+        #Sum total of columns with a missing value
+        mutate(missing_count = rowSums(is.na(.)))
+      
+      #Object for threshold of missing values per row
+      missing_row_threshold <- input$missing_threshold_processing 
+      
+      #filtering rows that don't meet the missing value threshold
+      if(missing_row_threshold < 9){
+        df <- df  %>%
+          #Removing rows that have more missing variables than threshold
+          filter(missing_count <= missing_row_threshold)
+      }
+      
+      
+      df
+      
     })
     
   # ================================================================================
@@ -179,6 +219,10 @@ shinyServer(function(input, output, session) {
     output$dynamic_filters_categorical_data <- renderUI(make_dynamic_filters_categorical("data"))
     output$dynamic_filters_categorical_counts_over_time <- renderUI(make_dynamic_filters_categorical("counts_over_time"))
     output$dynamic_filters_categorical_corr <- renderUI(make_dynamic_filters_categorical("corr"))
+    
+    #Dynamic filters for assignment 2
+    output$dynamic_filters_categorical_missing_processing <- renderUI(make_dynamic_filters_categorical("missing_processing"))
+    
     
     #Function to make dynamic numeric filters
     make_dynamic_filters_numeric <- function(label) {
@@ -215,6 +259,9 @@ shinyServer(function(input, output, session) {
     output$dynamic_filters_numeric_counts_over_time <- renderUI(make_dynamic_filters_numeric("counts_over_time"))
     output$dynamic_filters_numeric_corr <- renderUI(make_dynamic_filters_numeric("corr"))
 
+    #For assignment 2/processing section
+    output$dynamic_filters_numeric_missing_processing <- renderUI(make_dynamic_filters_numeric("missing_processing"))
+    
   
   
   # ================================================================================
@@ -495,8 +542,10 @@ shinyServer(function(input, output, session) {
         #Removing rows that have less missing variables than threshold
         filter(missing_count >= input$missing_threshold)
       
-      missing_threshold_title <- paste0("Rows With > ", input$missing_threshold, " Missing Variables | ")
+      missing_threshold_title <- paste0("Rows With < ", input$missing_threshold, " Missing Variables | ")
       }
+      
+      
       
       order_title <- NULL
       break_lines <- NULL
@@ -621,7 +670,7 @@ shinyServer(function(input, output, session) {
           
           na.value = na_value)
         
-        is_it_coloured <-  " Coloured by Data Type"
+        is_it_coloured <-  "| Coloured by Data Type"
         
         
 
@@ -1212,6 +1261,296 @@ shinyServer(function(input, output, session) {
     observeEvent(input$reset_filter_input_counts_over_time, {
       reset_filters("counts_over_time")
     })
+    
+    
+# =================================================================================
+# PROCESSING - MISSING VALUES 
+# =================================================================================
+    
+    #Missing values plot
+    output$missing_data_processing <- renderPlot({
+      
+      req(reactive_missing_processing())
+      
+      
+      df <- processed_missing_reactive()
+      
+      missing_threshold_title <- NULL
+
+      #Changing title depending on missing values threshold
+      if(input$missing_threshold_processing < 9){
+        missing_threshold_title <- paste0("Rows With <= ", input$missing_threshold_processing, " Missing Variables | ")
+      }
+      
+      missing_col_threshold_title <- NULL
+      
+      if(input$missing_col_threshold_processing < 100){
+        missing_col_threshold_title <- paste0("Variables With < ", input$missing_col_threshold_processing, "% Rows Missing")
+      }
+      
+      
+      order_title <- NULL
+      break_lines <- NULL
+      
+      #If order by missing values per row is selected, reorder dataframe
+      if (input$missing_order_na_row_sum_processing == TRUE){
+        df <- df %>% arrange(desc(missing_count))
+        
+        order_title <- paste0(" | Ordered by Missing Variable Count")
+        
+        #Identifying breaks in counts so line can be drawn
+        breaks <- which(diff(df$missing_count) != 0)
+        
+        #Proportion threshold for grouping labels together
+        prop_threshold <-  0.1
+        
+        #Calculating missing value group info 
+        group_info <- df %>%
+          group_by(missing_count) %>%
+          summarise(n = n(), .groups = "drop") %>%
+          arrange(desc(missing_count)) %>% 
+          #Calculating proportion each group takes of df
+          mutate(
+            prop = n / sum(n),
+            cum_prop = cumsum(prop)
+          ) 
+        
+        # Groups smaller than proportion threshold
+        small_groups <- group_info %>%
+          filter(cum_prop < prop_threshold)
+        
+        #If there are small groups then combine them all to one row
+        if (nrow(small_groups) > 1) {
+          
+          #Cutoff is minimum value in small groups
+          cutoff <- min(small_groups$missing_count)
+          
+          # Collapse all rows into one row with summary stats
+          collapsed <- group_info %>%
+            filter(missing_count >= cutoff) %>%
+            summarise(
+              missing_count = cutoff,
+              n = sum(n)
+            ) %>%
+            mutate(label = paste0("Missing ≥ ", cutoff, " | n = ", n))
+          
+          # Adding together large group and collapsed group
+          group_info <- group_info %>%
+            
+            #Removing values that are included in collapsed df
+            filter(missing_count < cutoff) %>%
+            mutate(label = paste0("Missing = ", missing_count, " | n = ", n)) %>%
+            bind_rows(collapsed)
+          #Otherwise apply label for all rows
+        }else{
+          group_info <- group_info %>% 
+            mutate(label = paste0("Missing = ", missing_count, " | n = ", n))
+        }
+        
+        #Computing plotting variables
+        group_info <- group_info %>%
+          arrange(desc(missing_count)) %>%
+          mutate(
+            end = cumsum(n),
+            start = end - n + 1,
+            mid = (start + end) / 2
+          )
+        
+        
+        break_lines <- list(
+          geom_hline(yintercept = group_info$end, colour = "black", size = 0.3),
+          annotate(
+            "text",
+            x = ncol(df - 1),
+            y = group_info$mid,
+            label = group_info$label,
+            hjust = 0,
+            size = 3
+          )
+        )
+      }
+      
+      
+      #Removing missing_count col before plotting
+      df$missing_count <-  NULL
+      
+      
+      factor_cols   <- names(df)[sapply(df, is.factor) & !sapply(df, is.ordered)]
+      ordered_cols  <- names(df)[sapply(df, is.ordered)]
+      numeric_cols  <- names(df)[sapply(df, is.numeric)]
+      
+      #Calculating missing % for each variable
+      missing_pct <- colMeans(is.na(df)) * 100
+      
+      #Ordering each group of columns by missing %
+      factor_cols   <- factor_cols[order(missing_pct[factor_cols], decreasing = TRUE)]
+      ordered_cols  <- ordered_cols[order(missing_pct[ordered_cols], decreasing = TRUE)]
+      numeric_cols  <- numeric_cols[order(missing_pct[numeric_cols], decreasing = TRUE)]
+      
+      #Specifying specific order so factor cols and ordered factor cols are together
+      new_order <- c(factor_cols, ordered_cols, numeric_cols)
+      
+      #Applying my new special order
+      df <- df[, new_order]
+      
+      
+      #Setting colour/legend inputs depending on if distinct datatypes selected or not
+      if (input$distinct_datatypes_missing_processing){
+        dtype_colours <-  datatype_colours
+        na_value <- "red"
+        
+        legend_position <- "top"
+        
+        legend_breaks <- names(dtype_colours)
+        #Adjusting column labels to include missing %
+        names(df) <-  paste0(names(df)," (", round(missing_pct[names(df)], 0),"%)")
+        
+        
+        viz <- vis_dat(df, sort_type = FALSE)
+        scale_fill <- scale_fill_manual(
+          
+          values = dtype_colours,
+          
+          breaks = legend_breaks,
+          
+          na.value = na_value)
+        
+        is_it_coloured <-  " | Coloured by Data Type"
+        
+        
+        
+        
+      } else{
+        na_value = "red"
+        legend_position <- "top"
+        scale_fill <-  scale_fill_manual(
+          values = c("FALSE" = "grey80", "TRUE" = "red"),
+          labels = c("Not Missing", "Missing"),
+          name = "Value Status"
+        )
+        
+        viz <- vis_miss(df, sort_miss = FALSE, show_perc = FALSE)
+        
+        is_it_coloured <-  NULL
+      }
+      
+      
+      row_count <- nrow(df)
+      col_count <- ncol(df)
+      
+      
+      missing_threshold_title <- paste0("Rows With <= ", input$missing_threshold_processing, " Missing Variables | ")
+      
+      missing_col_threshold_title <- paste0("Variables With < ", input$missing_col_threshold_processing, "% Rows Missing")
+      
+      
+      #Visualizing dataframe with new order and sort_type = FALSE
+      #This way factor/ordered factors are side by side in the final plot
+      viz +
+        labs(title = paste0("Missing Data",
+                            is_it_coloured,
+                            order_title,
+                            "\n",
+                            row_count,
+                            " / ",
+                            nrow(data),
+                            " Rows | ",
+                            col_count,
+                            " / ",
+                            ncol(data) - 1,
+                            " Columns",
+                            "\n",
+                            missing_threshold_title,
+                            missing_col_threshold_title
+                            )) +
+        scale_fill + #datatype colours list found in global.r
+        
+        break_lines +  
+        
+        coord_cartesian(clip = "off") +
+        
+        theme(
+          axis.text.x = element_text(
+            angle = 70,
+            hjust = 0,
+            vjust = 0,
+            margin = margin(t = 10)),
+          plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+          plot.margin = margin(t = 50, r = 120),
+          legend.position = legend_position) 
+      
+      
+      
+    })
+  
+    #gg_miss plot
+    output$gg_miss <-  renderPlot({
+      df <- processed_missing_reactive()
+      
+      order <- input$order_by_gg_miss
+      
+      if (input$order_by_gg_miss == "Both"){
+        order <- c("freq", "degree")
+      }
+
+
+      gg_miss_upset(df,
+                    nsets = input$gg_miss_nsets, 
+                    nintersects = input$gg_miss_nintersects, 
+                    order.by = order) 
+      
+    })
+    
+    
+    #rpart plot
+    output$rpart <- renderPlot({
+      df <- processed_missing_reactive()
+      
+      df[, !names(df) %in% c("CODE", "OBS_TYPE"), drop = FALSE]
+      
+      model <- rpart(formula = missing_count ~ .,
+                     data = df,
+                     method = "anova",
+                     control = rpart.control(
+                       maxdepth = 5,
+                       cp = 0.01,
+                       minsplit = 20
+                     ))
+      rpart.plot::rpart.plot(model, shadow.col = "gray", varlen = 5)
+    })
+    
+    #Reset missing plot specific inputs
+    observeEvent(input$reset_missing_plot, {
+      reset("distinct_datatypes_missing_processing")
+      reset("missing_order_na_row_sum_processing")
+    })
+    
+    #Reset gg miss plot specific inputs
+    observeEvent(input$reset_gg_miss_plot, {
+      reset("gg_miss_nsets")
+      reset("gg_miss_nintersects")
+      
+    })
+    
+    #Reset rpart plot specific inputs
+    observeEvent(input$reset_rpart_plot, {
+      reset("")
+    })
+    
+    #Reset missing dataframe processing inputs
+    observeEvent(input$reset_input_missing_processing, {
+      reset("selected_vars_numeric_missing_processing")
+      reset("selected_vars_categorical_missing_processing")
+      reset("missing_threshold_processing")
+      reset("missing_col_threshold_processing")
+      reset_filters("missing_processing")
+    })
+    
+    #Reset only filter inputs
+    observeEvent(input$reset_filter_input_missing_processing, {
+      reset_filters("missing_processing")
+    })
+    
 } 
 
 )

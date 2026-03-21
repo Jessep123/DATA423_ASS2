@@ -27,6 +27,9 @@ library(sass)
 library(plotly)
 library(rsconnect)
 library(corrplot)
+library(naniar)
+library(rpart)
+library(rpart.plot)
 
 
 #Data without any changes made to it
@@ -87,6 +90,20 @@ non_cat_vars <- data[, (sapply(data, is.numeric))]
 
 cat_filter_cols <- names(cat_vars)
 num_filter_cols <- names(non_cat_vars)
+
+#Chart console for data processing plots
+chart_console <- function(...) {
+  div(
+    style = "
+      background-color: #f8f9fa;
+      padding: 15px;
+      border-radius: 10px;
+      margin-top: 10px;
+      border: 1px solid #dee2e6;
+    ",
+    ...
+  )
+}
 
 
 # =================================================================================
@@ -290,5 +307,35 @@ selected_y_scatter <- pickerInput(
   options = list(
     `actions-box` = TRUE,
     `live-search` = TRUE
+  )
+)
+
+# =================================================================================
+#   PROCESSING OF MISSING VALUES 
+# ================================================================================
+
+select_variables_numeric_missing_processing <- pickerInput(
+  inputId = "selected_vars_numeric_missing_processing",
+  label = "Numeric Variables",
+  choices = names(non_cat_vars),
+  selected = names(non_cat_vars),
+  multiple = TRUE,
+  options = list(
+    `actions-box` = TRUE,
+    `live-search` = TRUE
+  )
+)
+
+
+
+select_variables_categorical_missing_processing <- pickerInput(
+  inputId = "selected_vars_categorical_missing_processing",
+  label = "Categorical Variables",
+  choices = names(cat_vars),
+  selected = names(cat_vars),
+  multiple = TRUE,
+  options = list(
+    `actions-box` = TRUE,  
+    `live-search` = TRUE    
   )
 )
