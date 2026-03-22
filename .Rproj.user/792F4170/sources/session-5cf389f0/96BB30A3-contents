@@ -142,31 +142,38 @@ shinyServer(function(input, output, session) {
     
     
 
-    #Reactive data table for checking data in processing data section
-    output$missing_processing_reactive_table <- renderDataTable({
-      processed_missing_reactive()
-    })
+    
     
     
 # ================================================================================
-#       PROCESSING SECTION
+#       PROCESSING SECTION DATATABLES
 # ================================================================================
     
-    #Reactive dataset for processing missing data
+    #Reactive dataset for processing missing data - First stage of pipeline
     processed_missing_reactive <- reactive({
       df <- reactive_missing_processing()
-      
-      #Handling Missing Values per row threshold
-      
 
       
-      #Object for missing column proportion threshold
-      missing_col_threshold <-  input$missing_col_threshold_processing
+      # Column missingness percentages
+      missing_col_range <- input$missing_col_threshold_processing
+      col_missing_pct <- colMeans(is.na(df)) * 100
       
-      if(missing_col_threshold < 100){
-        #Keeping columns that have less missing values than threshold
-        df <- df[, colMeans(is.na(df)) * 100 < missing_col_threshold]
-      }
+      keep_names <- names(col_missing_pct)[
+        col_missing_pct >= missing_col_range[1] &
+          col_missing_pct <= missing_col_range[2]
+      ]
+      
+      # Always keep missing_count
+      keep_names <- union(keep_names, "missing_count")
+      
+      # Only keep names that actually exist
+      keep_names <- intersect(keep_names, names(df))
+      
+      req(length(keep_names) > 0)
+      
+      df <- df[, keep_names, drop = FALSE]
+      
+      
       
       #Calculating missing count for each row
       df <- df %>%
@@ -177,15 +184,37 @@ shinyServer(function(input, output, session) {
       missing_row_threshold <- input$missing_threshold_processing 
       
       #filtering rows that don't meet the missing value threshold
-      if(missing_row_threshold < 9){
         df <- df  %>%
           #Removing rows that have more missing variables than threshold
-          filter(missing_count <= missing_row_threshold)
-      }
+          filter(
+            missing_count >= missing_row_threshold[1],
+            missing_count <= missing_row_threshold[2]
+          )     
+        
       
       
       df
       
+    })
+    
+    
+    #Second stage of pipeline - dependant on processed_missing_reactive
+    processed_outlier_reactive <-  reactive({
+      
+      #Takes result of missing processing section and goes from there
+      df <- processed_missing_reactive()
+      
+      df
+    })
+    
+    #Reactive data table for checking data in processing data section
+    output$missing_processing_reactive_table <- renderDataTable({
+      processed_missing_reactive()
+    })
+    
+    #Reactive data table for checking data in processing data section
+    output$outlier_processing_reactive_table <- renderDataTable({
+      processed_outlier_reactive()
     })
     
   # ================================================================================
@@ -222,6 +251,7 @@ shinyServer(function(input, output, session) {
     
     #Dynamic filters for assignment 2
     output$dynamic_filters_categorical_missing_processing <- renderUI(make_dynamic_filters_categorical("missing_processing"))
+    output$dynamic_filters_categorical_outlier_processing <- renderUI(make_dynamic_filters_categorical("outlier_processing"))
     
     
     #Function to make dynamic numeric filters
@@ -261,6 +291,7 @@ shinyServer(function(input, output, session) {
 
     #For assignment 2/processing section
     output$dynamic_filters_numeric_missing_processing <- renderUI(make_dynamic_filters_numeric("missing_processing"))
+    output$dynamic_filters_numeric_outlier_processing <- renderUI(make_dynamic_filters_numeric("outlier_processing"))
     
   
   
@@ -1264,8 +1295,33 @@ shinyServer(function(input, output, session) {
     
     
 # =================================================================================
-# PROCESSING - MISSING VALUES 
+# PROCESSING - MISSING VALUES PLOTS
 # =================================================================================
+    
+    #PLOT CAPTION
+    #Same caption for all missing value plots since they use the same data
+    missing_data_caption <- reactive({
+      
+      df <- processed_missing_reactive()
+      
+      row_count <- nrow(df)
+      col_count <- ncol(df)
+    
+    row_range <- input$missing_threshold_processing
+    col_range <- input$missing_col_threshold_processing
+    
+    
+    missing_row_threshold_title <- paste0("Rows With ", row_range[1], " to ", row_range[2], " Missing Variables | ")
+    missing_col_threshold_title <- paste0("Variables With ", col_range[1], "% to ", col_range[2],"% Rows Missing")
+    
+    paste0(
+      row_count, " / ", nrow(data), " Rows | ",
+      col_count, " / ", ncol(data) - 1, " Columns",
+      "\n",
+      missing_row_threshold_title,
+      missing_col_threshold_title
+    )
+    })
     
     #Missing values plot
     output$missing_data_processing <- renderPlot({
@@ -1275,18 +1331,6 @@ shinyServer(function(input, output, session) {
       
       df <- processed_missing_reactive()
       
-      missing_threshold_title <- NULL
-
-      #Changing title depending on missing values threshold
-      if(input$missing_threshold_processing < 9){
-        missing_threshold_title <- paste0("Rows With <= ", input$missing_threshold_processing, " Missing Variables | ")
-      }
-      
-      missing_col_threshold_title <- NULL
-      
-      if(input$missing_col_threshold_processing < 100){
-        missing_col_threshold_title <- paste0("Variables With < ", input$missing_col_threshold_processing, "% Rows Missing")
-      }
       
       
       order_title <- NULL
@@ -1361,7 +1405,7 @@ shinyServer(function(input, output, session) {
           geom_hline(yintercept = group_info$end, colour = "black", size = 0.3),
           annotate(
             "text",
-            x = ncol(df - 1),
+            x = ncol(df) - 1,
             y = group_info$mid,
             label = group_info$label,
             hjust = 0,
@@ -1435,13 +1479,6 @@ shinyServer(function(input, output, session) {
       }
       
       
-      row_count <- nrow(df)
-      col_count <- ncol(df)
-      
-      
-      missing_threshold_title <- paste0("Rows With <= ", input$missing_threshold_processing, " Missing Variables | ")
-      
-      missing_col_threshold_title <- paste0("Variables With < ", input$missing_col_threshold_processing, "% Rows Missing")
       
       
       #Visualizing dataframe with new order and sort_type = FALSE
@@ -1449,20 +1486,9 @@ shinyServer(function(input, output, session) {
       viz +
         labs(title = paste0("Missing Data",
                             is_it_coloured,
-                            order_title,
-                            "\n",
-                            row_count,
-                            " / ",
-                            nrow(data),
-                            " Rows | ",
-                            col_count,
-                            " / ",
-                            ncol(data) - 1,
-                            " Columns",
-                            "\n",
-                            missing_threshold_title,
-                            missing_col_threshold_title
-                            )) +
+                            order_title
+                            ),
+             caption = missing_data_caption()) +
         scale_fill + #datatype colours list found in global.r
         
         break_lines +  
@@ -1477,6 +1503,11 @@ shinyServer(function(input, output, session) {
             margin = margin(t = 10)),
           plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
           plot.margin = margin(t = 50, r = 120),
+          plot.caption = element_text(
+            size = 11,
+            hjust = 0,   
+            margin = margin(t = 10)
+          ),
           legend.position = legend_position) 
       
       
@@ -1501,24 +1532,133 @@ shinyServer(function(input, output, session) {
       
     })
     
+    #Updating rpart colunms that can be selected depending on what is in processed_missing_reactive()
+    observe({
+      df <- processed_missing_reactive()
+      
+      valid_cols <- names(df)[!names(df) %in% c("missing_count", "CODE", "OBS_TYPE")]
+      
+      updatePickerInput(
+        session,
+        "rpart_exclude_vars",
+        choices = valid_cols
+      )
+    })
     
     #rpart plot
     output$rpart <- renderPlot({
       df <- processed_missing_reactive()
       
-      df[, !names(df) %in% c("CODE", "OBS_TYPE"), drop = FALSE]
+      #Dropping code/obs type options
+      df <-  df[, !names(df) %in% c("CODE", "OBS_TYPE"), drop = FALSE]
       
-      model <- rpart(formula = missing_count ~ .,
+      #Removing manually specified options if needed
+      df <- df[, !names(df) %in% input$rpart_exclude_vars, drop = FALSE]
+      
+      # Default method is regression
+      method_type <- "anova"
+      
+      #Default title
+      prediction_title <- "Predicting Number of Missing Values Per Observation"
+      
+      #Special condition for binary classification
+      if (input$rpart_target_type == "Binary (Missing/Not Missing"){
+        
+        #Converting missing_count to binary Missing/No missing
+        df$missing_count <- factor(
+          ifelse(df$missing_count > 0, "Missing", "No Missing Values")
+        )        
+        
+        #Converting method_type to class
+        method_type <- "class"
+        
+        prediction_title <- "Predicting Complete vs Missing Value Observations"
+      }
+      
+      rpart_model <- rpart(formula = missing_count ~ .,
                      data = df,
-                     method = "anova",
+                     method = method_type,
                      control = rpart.control(
-                       maxdepth = 5,
-                       cp = 0.01,
-                       minsplit = 20
+                       maxdepth = input$rpart_maxdepth,
+                       cp = input$rpart_cp,
+                       minsplit = input$rpart_minsplit
                      ))
-      rpart.plot::rpart.plot(model, shadow.col = "gray", varlen = 5)
+      #Plot title
+      rpart_title <- paste0(prediction_title)
+      
+      rpart_subtitle <- paste0(
+        "Max Depth: ", input$rpart_maxdepth,
+        " | Min Split: ", input$rpart_minsplit,
+        " | CP: ", input$rpart_cp
+      )
+      
+      rpart.plot::rpart.plot(rpart_model, 
+                             shadow.col = "gray",
+                             type = as.integer(input$rpart_type),
+                             extra = ifelse(input$rpart_extra, 1, 0),
+                             main = rpart_title,
+                             sub = rpart_subtitle
+                             )
     })
+
     
+    #Missing value correlation plot
+    output$missing_corr_plot <-  renderPlot({
+      
+      df <- processed_missing_reactive()
+      
+
+      
+      df_shadow <- is.na(df) + 0 
+      col_means <- colMeans(df_shadow)
+      
+      #ignore vars that are all (or never) missing
+      df_shadow <- df_shadow[ , col_means > 0 & col_means < 1, drop = FALSE]
+      
+
+      corr_matrix <- cor(df_shadow,
+                         method = input$corr_missing_method)
+      
+      if (input$corr_missing_absolute) {
+        corr_matrix <- abs(corr_matrix)
+      }
+      
+      
+      if (input$corr_missing_display) {
+        display <- "black"
+      } else{ display <- NULL}
+      
+      corrplot(
+        corr_matrix,
+        method = "color",
+        type = "upper",
+        order = input$corr_missing_order,
+        col = colorRampPalette(c("blue","white","red"))(200),
+        addCoef.col = display,
+        cl.pos = "r",
+        tl.col = "black",
+        title = paste0(
+          "Correlation Chart\n",
+          "Type - ", input$corr_missing_method,
+          " | ",
+          "Order - ", input$corr_missing_order
+        ),
+        mar = c(0,0,2,0)
+      )
+      
+      #Adding caption for context
+      mtext(
+        missing_data_caption(),
+        side = 1,       
+        line = 3,      
+        adj = 0,       
+        cex = 0.8       
+      )
+    })
+ 
+# =================================================================================
+# PROCESSING - MISSING VALUES RESET INPUTS 
+# =================================================================================     
     #Reset missing plot specific inputs
     observeEvent(input$reset_missing_plot, {
       reset("distinct_datatypes_missing_processing")
@@ -1534,7 +1674,22 @@ shinyServer(function(input, output, session) {
     
     #Reset rpart plot specific inputs
     observeEvent(input$reset_rpart_plot, {
-      reset("")
+      reset("rpart_maxdepth")
+      reset("rpart_cp")
+      reset("rpart_minsplit")
+      reset("rpart_type")
+      reset("rpart_extra")
+      reset("rpart_exclude_vars")
+      reset("rpart_target_type")
+      
+    })
+    
+    #Reeset correlation plot specifc inputs
+    observeEvent(input$reset_corr_missing_plot, {
+      reset("corr_missing_order")
+      reset("corr_missing_method")
+      reset("corr_missing_display")
+      reset("corr_missing_absolute")
     })
     
     #Reset missing dataframe processing inputs
@@ -1551,6 +1706,154 @@ shinyServer(function(input, output, session) {
       reset_filters("missing_processing")
     })
     
-} 
+# =================================================================================
+# PROCESSING - MISSING VALUES EXPORT OPTIONS
+# =================================================================================
+    #Export as csv file
+    output$data_export_csv_missing_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".csv")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write.csv(processed_missing_reactive(), file, row.names = FALSE)
+      }
+    )
+    
+    #Export as excel workboox file
+    output$data_export_xlsx_missing_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".xlsx")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write.xlsx(processed_missing_reactive(), file)
+      }
+    )
+    
+    #Export as .sav file for SPSS
+    output$data_export_spss_missing_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".sav")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write_sav(processed_missing_reactive(), file)
+      }
+    )
+    
+    output$data_export_tsv_missing_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".tsv")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write_tsv(processed_missing_reactive(), file)
+      }
+    )
+    
+    output$data_export_rds_missing_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".rds")
+      },
+      
+      content = function(file){
+        saveRDS(processed_missing_reactive(), file)
+      }
+    )
+    
+
+# =================================================================================
+# PROCESSING - OUTLIER VALUES 
+# =================================================================================
+   
+    
+    #Reset sidebar values
+    observeEvent(input$reset_input_outlier_processed, {
+      reset_filters("outlier_processed")
+      
+    })
+    
+    #Reset only filter inputs
+    observeEvent(input$reset_filter_input_outlier_processed, {
+      reset_filters("outlier_processed")
+    }) 
+    
+    
+    #Export options in datatable tab
+    #Export as csv file
+    output$data_export_csv_outlier_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".csv")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write.csv(processed_outlier_reactive(), file, row.names = FALSE)
+      }
+    )
+    
+    #Export as excel workboox file
+    output$data_export_xlsx_outlier_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".xlsx")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write.xlsx(processed_outlier_reactive(), file)
+      }
+    )
+    
+    #Export as .sav file for SPSS
+    output$data_export_spss_outlier_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".sav")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write_sav(processed_outlier_reactive(), file)
+      }
+    )
+    
+    output$data_export_tsv_outlier_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".tsv")
+      },
+      
+      content = function(file) {
+        # Write the content to a temporary file path provided by Shiny
+        write_tsv(processed_outlier_reactive(), file)
+      }
+    )
+    
+    output$data_export_rds_outlier_processed <- downloadHandler(
+      filename = function() {
+        # Dynamically generate the filename
+        paste("Ass2_Shiny_Export-", Sys.Date(), ".rds")
+      },
+      
+      content = function(file){
+        saveRDS(processed_outlier_reactive(), file)
+      }
+    )
+    
+
+    
+    } 
 
 )

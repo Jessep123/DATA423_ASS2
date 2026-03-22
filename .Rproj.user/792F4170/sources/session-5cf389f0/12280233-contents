@@ -342,10 +342,10 @@ shinyUI(
                             actionButton("reset_input_missing_processing","Reset Inputs"),
                             sliderInput(
                               "missing_threshold_processing",
-                              "Missing Values per Row Threshold",
+                              "Missing Values per Row Threshold Range",
                               min = 0,
                               max = 9,
-                              value = 9,
+                              value = c(0, 9),
                               step = 1
                             ),
                             
@@ -354,10 +354,10 @@ shinyUI(
                             
                             sliderInput(
                               "missing_col_threshold_processing",
-                              "Variable % Missing Threshold",
+                              "Variable % Missing Threshold Range",
                               min = 0,
                               max = 100,
-                              value = 100,
+                              value = c(0, 100),
                               step = 1,
                               post = "%"
                             ),
@@ -482,6 +482,23 @@ shinyUI(
                                      accordion_panel("Chart Controls", 
                                                      chart_console(
                                                        fluidRow(
+                                                         column(4, sliderInput("rpart_maxdepth", "Max Depth", 1, 10, 5)),
+                                                         column(4, sliderInput("rpart_cp", "Pruning (cp)", 0.001, 0.1, 0.01, step = 0.01)),
+                                                         column(4, sliderInput("rpart_minsplit", "Min Split", 10, 100, 20))
+                                                       ),
+                                                       
+                                                       fluidRow(
+                                                         column(4, selectInput("rpart_type", "Layout", c("Standard"=2, "Vertical"=3))),
+                                                         column(4, pickerInput("rpart_exclude_vars", "Exclude Variables",
+                                                                               choices = NULL, multiple = TRUE)),
+                                                         selectInput("rpart_target_type", "Target Type",
+                                                                     choices = c("# Missing Values", "Binary (Missing/Not Missing"),
+                                                                     selected = "# Missing Values")
+
+                                                       ),
+                                                       fluidRow(
+                                                         column(4, checkboxInput("rpart_extra", "Show Extra Info", TRUE)),
+                                                         
                                                          column(4,
                                                                 div(
                                                                   style = "display: flex; justify-content: flex-end;",
@@ -494,12 +511,159 @@ shinyUI(
                                    )
                                    
                                    ),
-                          tabPanel("Data Table",
+                          tabPanel("Missing Values Correlation",
+                                   value = "corr_missing_tab",
+                                   
+                                   plotOutput("missing_corr_plot", height = "600px"),
+                                   
+                                   accordion(open = FALSE,
+                                             accordion_panel("Chart Controls", 
+                                                             chart_console(
+                                                               fluidRow(
+                                                                 
+                                                                 column(3,
+                                                                        pickerInput(
+                                                                          inputId = "corr_missing_method",
+                                                                          label = "Correlation Type",
+                                                                          choices = c(
+                                                                            "Pearson" = "pearson",
+                                                                            "Spearman" = "spearman",
+                                                                            "Kendall" = "kendall"
+                                                                          ),
+                                                                          selected = "pearson",
+                                                                          multiple = FALSE,
+                                                                          options = list(
+                                                                            `live-search` = TRUE
+                                                                          )
+                                                                        )
+                                                                 ),
+                                                                 
+                                                                 column(3,
+                                                                        pickerInput(
+                                                                          inputId = "corr_missing_order",
+                                                                          label = "Order Variables",
+                                                                          choices = c(
+                                                                            "Original" = "original",
+                                                                            "AOE" = "AOE",
+                                                                            "FPC" = "FPC",
+                                                                            "Hierarchical Clustering" = "hclust",
+                                                                            "Alphabetical" = "alphabet"
+                                                                          ),
+                                                                          selected = "original",
+                                                                          multiple = FALSE,
+                                                                          options = list(
+                                                                            `live-search` = TRUE
+                                                                          )
+                                                                        )
+                                                                 ),
+                                                                 
+                                                                 column(2,
+                                                                        checkboxInput("corr_missing_absolute", "Absolute", value = FALSE),
+                                                                        checkboxInput("corr_missing_display", "Show Values", value = FALSE)
+                                                                 ),
+                                                                 
+                                                                 column(4,
+                                                                        div(
+                                                                          style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
+                                                                          actionButton(
+                                                                            "reset_corr_missing_plot",
+                                                                            "Reset"
+                                                                          )
+                                                                        )
+                                                                 )
+                                                               )
+                                                             )                                  
+                                             )
+                                   )
+                                   
+                          ),
+                          tabPanel("Data Table Export",
                                    value = "data_tab",
-                                  DTOutput("missing_processing_reactive_table")) 
+                                   div(
+                                     style = "margin-bottom: 24px;",
+                                     DTOutput("missing_processing_reactive_table")
+                                   ),
+                                  accordion(open = FALSE,
+                                            accordion_panel("Export Options", 
+                                                            chart_console(
+                                                              fluidRow(
+                                                                downloadButton('data_export_csv_missing_processed', 'Export as .csv'),
+                                                                
+                                                                downloadButton('data_export_xlsx_missing_processed', 'Export as .xlsx'),
+                                                                
+                                                                downloadButton('data_export_spss_missing_processed', 'Export as .sav (for SPSS)'),
+                                                                
+                                                                downloadButton('data_export_tsv_missing_processed', 'Export as .tsv'),
+                                                                
+                                                                downloadButton('data_export_rds_missing_processed', 'Export as .rds (R Data File)')
+                                                              ))))
+                                                              ) 
                           )   
                         )
-                  )
+                  ),
+               tabPanel("Outliers",
+                        layout_sidebar(
+                          sidebar = sidebar(
+                            title = "Fuck around and find out I guess - outlier edition",
+                            
+                            actionButton("reset_input_outlier_processing","Reset Inputs"),
+
+                            accordion(open = FALSE,
+                                      
+                                      #For selecting variables to be in dataset
+                                      accordion_panel(
+                                        "Select Variables",
+                                        select_variables_numeric_outlier_processing,
+                                        select_variables_categorical_outlier_processing
+                                      ),
+                                      
+                                      #For filtering variables in dataset
+                                      accordion_panel(
+                                        "Filter Categorical Variables",
+                                        uiOutput("dynamic_filters_categorical_outlier_processing")
+                                      ),
+                                      accordion_panel(
+                                        "Filter Numeric Variables",
+                                        uiOutput("dynamic_filters_numeric_outlier_processing")
+                                      )
+                            ),
+                            
+                            actionButton("reset_filter_input_missing_processing", "Reset Filters")
+                            
+                            
+                          ),#end of sidebar()
+                          
+                          tabsetPanel(
+                          tabPanel("Boxplot?"),
+                          tabPanel("Data Table Export",
+                                   div(
+                                     style = "margin-bottom: 24px;",
+                                     DTOutput("outlier_processing_reactive_table")
+                                   ),
+                                   accordion(open = FALSE,
+                                             accordion_panel("Export Options", 
+                                                             chart_console(
+                                                               fluidRow(
+                                                                 downloadButton('data_export_csv_outlier_processed', 'Export as .csv'),
+                                                                 
+                                                                 downloadButton('data_export_xlsx_outlier_processed', 'Export as .xlsx'),
+                                                                 
+                                                                 downloadButton('data_export_spss_outlier_processed', 'Export as .sav (for SPSS)'),
+                                                                 
+                                                                 downloadButton('data_export_tsv_outlier_processed', 'Export as .tsv'),
+                                                                 
+                                                                 downloadButton('data_export_rds_outlier_processed', 'Export as .rds (R Data File)')
+                                                               ))))
+                          )
+                          
+                          
+                          ) #End of tabset panel
+                        )#End of layout_sidebar
+                        
+                      ),#End of outlier tab panel
+               
+               
+               tabPanel("Processed Data Summary")
                
     ),
 

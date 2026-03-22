@@ -3,7 +3,7 @@
     "path": "C:/Users/jessep.LAPTOP-7GPOPVDF/Desktop/R Projects/DATA423/ass2/ui.R",
     "project_path": "ui.R",
     "type": "r_source",
-    "hash": "894452441",
+    "hash": "0",
     "contents": "",
     "dirty": false,
     "created": 1773627332155.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "478,71",
-        "scrollLine": "472"
+        "cursorPosition": "724,0",
+        "scrollLine": "480"
     },
     "folds": "",
-    "lastKnownWriteTime": 1773974209,
+    "lastKnownWriteTime": 1774143000,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1773974209818,
+    "last_content_update": 1774143000872,
     "read_only": false,
     "read_only_alternatives": []
 }
