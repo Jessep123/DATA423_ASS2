@@ -346,8 +346,8 @@ select_variables_categorical_missing_processing <- pickerInput(
 select_variables_numeric_outlier_processing <- pickerInput(
   inputId = "selected_vars_numeric_outlier_processing",
   label = "Numeric Variables",
-  choices = names(non_cat_vars),
-  selected = names(non_cat_vars),
+  choices = NULL,
+  selected = NULL,
   multiple = TRUE,
   options = list(
     `actions-box` = TRUE,
@@ -360,8 +360,8 @@ select_variables_numeric_outlier_processing <- pickerInput(
 select_variables_categorical_outlier_processing <- pickerInput(
   inputId = "selected_vars_categorical_outlier_processing",
   label = "Categorical Variables",
-  choices = names(cat_vars),
-  selected = names(cat_vars),
+  choices = NULL,
+  selected = NULL,
   multiple = TRUE,
   options = list(
     `actions-box` = TRUE,  

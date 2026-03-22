@@ -499,6 +499,17 @@ shinyUI(
                                                        fluidRow(
                                                          column(4, checkboxInput("rpart_extra", "Show Extra Info", TRUE)),
                                                          
+                                                         column(
+                                                           4,
+                                                           radioButtons(
+                                                             "rpart_plot_mode",
+                                                             "Display",
+                                                             choices = c("Tree" = "tree", "Variable Importance" = "varimp"),
+                                                             selected = "tree",
+                                                             inline = TRUE
+                                                           )
+                                                         ),
+                                                         
                                                          column(4,
                                                                 div(
                                                                   style = "display: flex; justify-content: flex-end;",
@@ -628,13 +639,40 @@ shinyUI(
                                       )
                             ),
                             
-                            actionButton("reset_filter_input_missing_processing", "Reset Filters")
+                            actionButton("reset_filter_input_outlier_processed", "Reset Filters")
                             
                             
                           ),#end of sidebar()
                           
                           tabsetPanel(
-                          tabPanel("Boxplot?"),
+                          tabPanel("Variable Density",
+                                   plotOutput("outlier_density_plot")),
+                            accordion(open = FALSE,
+                                      accordion_panel("Chart Controls", 
+                                                      chart_console(
+                                                        fluidRow(
+                                                          column(4,
+                                                                 pickerInput(
+                                                                   inputId = "selected_vars_numeric_outlier_density_plot",
+                                                                   label = "Variables to Plot",
+                                                                   choices = NULL,
+                                                                   selected = NULL,
+                                                                   multiple = TRUE,
+                                                                   options = list(
+                                                                     `actions-box` = TRUE,
+                                                                     `live-search` = TRUE
+                                                                   )
+                                                                 )),
+                                                          column(4,
+                                                                 div(
+                                                                   style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
+                                                                   actionButton(
+                                                                     "reset_density_outlier_plot",
+                                                                     "Reset"
+                                                                   )
+                                                                 )
+                                                          )
+                                                        )))),
                           tabPanel("Data Table Export",
                                    div(
                                      style = "margin-bottom: 24px;",

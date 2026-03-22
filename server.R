@@ -21,6 +21,53 @@ shinyServer(function(input, output, session) {
 # ================================================================================
 #       REACTIVE DATASETS
 # ================================================================================
+  #Helper function to filter reactive datasets based on tab label
+  # Apply categorical and numeric filters for a given tab label to any dataframe
+  filter_data <- function(df, label) {
+    
+    # Categorical filters
+    for (col in cat_filter_cols) {
+      if (!col %in% names(df)) next
+      
+      input_name <- paste0("selected_", tolower(col), "_", label)
+      selected_vals <- input[[input_name]]
+      
+      if (!is.null(selected_vals) && length(selected_vals) > 0) {
+        df <- df %>%
+          filter(
+            (.data[[col]] %in% selected_vals) |
+              (is.na(.data[[col]]) & "NA" %in% selected_vals)
+          )
+      }
+    }
+    
+    # Numeric filters
+    for (col in num_filter_cols) {
+      if (!col %in% names(df)) next
+      
+      # Use the dataframe being filtered, not global data
+      full_min <- min(df[[col]], na.rm = TRUE)
+      full_max <- max(df[[col]], na.rm = TRUE)
+      
+      input_name <- paste0("selected_", tolower(col), "_", label)
+      selected_vals <- input[[input_name]]
+      
+      if (!is.null(selected_vals) &&
+          length(selected_vals) == 2 &&
+          (selected_vals[1] > full_min || selected_vals[2] < full_max)) {
+        
+        df <- df %>%
+          filter(
+            .data[[col]] >= selected_vals[1] &
+              .data[[col]] <= selected_vals[2]
+          )
+      }
+    }
+    
+    df
+  }
+  
+  
   #Helper function to create reactive datasets  
   
   #Returns dataset filtered by tab filters with selected columns
@@ -45,41 +92,8 @@ shinyServer(function(input, output, session) {
         if (is.null(cat_cols)){cat_cols <-  cat_filter_cols}
         
 
-        # Applying reactive categorical filters to dataset 
-        for (col in cat_filter_cols) {
-          input_name <- paste0("selected_", tolower(col), "_", label)
-          selected_vals <- input[[input_name]]
-
-          #If a filter has a selected value, corresponding column is filtered for it
-          if (!is.null(selected_vals) && length(selected_vals) > 0) {
-            df <- df %>%
-              filter(
-                (.data[[col]] %in% selected_vals) |
-                  (is.na(.data[[col]]) & "NA" %in% selected_vals)
-              )
-          }
-        }
-
-        for (col in num_filter_cols) {
-          
-          #Original mix/max values that aren't rounded for slider
-          full_min <- min(data[[col]], na.rm = TRUE)
-          full_max <- max(data[[col]], na.rm = TRUE)
-          
-         #Defining input and selected values from input
-        input_name <- paste0("selected_", tolower(col), "_", label)
-        selected_vals <- input[[input_name]]
-        
-        if (!is.null(selected_vals) &&
-            #If selected values are different from original min/max
-            (selected_vals[1] > full_min || selected_vals[2] < full_max)) {            
-          
-          df <- df %>% 
-              filter( 
-                (.data[[col]] >= selected_vals[1]) 
-                & (.data[[col]] <= selected_vals[2])) 
-        }
-          }
+        #applying reactive filter function 
+        df <- filter_data(df, label)
 
         
         #Special condition for selecting columns for plots based on requirements
@@ -140,11 +154,7 @@ shinyServer(function(input, output, session) {
     #Processing dataset
     reactive_missing_processing <- reactive_dataset("missing_processing")
     
-    
 
-    
-    
-    
 # ================================================================================
 #       PROCESSING SECTION DATATABLES
 # ================================================================================
@@ -197,12 +207,49 @@ shinyServer(function(input, output, session) {
       
     })
     
+    #Updating outlier processing select inputs based on output of processed_missing_reactive()
+    observe({
+      df <- processed_missing_reactive()
+      
+      req(df)
+      
+      #dropping missing_count
+      df$missing_count <-  NULL
+      
+      numeric_choices <- names(df)[sapply(df, is.numeric)]
+      categorical_choices <- names(df)[sapply(df, is.factor)]
+      
+      updatePickerInput(
+        session,
+        inputId = "selected_vars_numeric_outlier_processing",
+        choices = numeric_choices,
+        selected = numeric_choices
+      )
+      
+      updatePickerInput(
+        session,
+        inputId = "selected_vars_categorical_outlier_processing",
+        choices = categorical_choices,
+        selected = categorical_choices
+      )
+    })
+    
     
     #Second stage of pipeline - dependant on processed_missing_reactive
     processed_outlier_reactive <-  reactive({
       
       #Takes result of missing processing section and goes from there
       df <- processed_missing_reactive()
+
+      #Applying any tab filters
+      df <- filter_data(df, "outlier_processing")
+      
+      #Only returning selected columns from page inputs
+      selected_vars <- unlist(c(
+        input$selected_vars_numeric_outlier_processing,
+        input$selected_vars_categorical_outlier_processing
+      ), use.names = FALSE)
+      df <- df %>% select(all_of(selected_vars))
       
       df
     })
@@ -1316,7 +1363,7 @@ shinyServer(function(input, output, session) {
     
     paste0(
       row_count, " / ", nrow(data), " Rows | ",
-      col_count, " / ", ncol(data) - 1, " Columns",
+      col_count, " / ", ncol(data), " Columns",
       "\n",
       missing_row_threshold_title,
       missing_col_threshold_title
@@ -1405,7 +1452,7 @@ shinyServer(function(input, output, session) {
           geom_hline(yintercept = group_info$end, colour = "black", size = 0.3),
           annotate(
             "text",
-            x = ncol(df) - 1,
+            x = ncol(df),
             y = group_info$mid,
             label = group_info$label,
             hjust = 0,
@@ -1566,13 +1613,13 @@ shinyServer(function(input, output, session) {
         
         #Converting missing_count to binary Missing/No missing
         df$missing_count <- factor(
-          ifelse(df$missing_count > 0, "Missing", "No Missing Values")
+          ifelse(df$missing_count > 0, "Missing", "Complete")
         )        
         
         #Converting method_type to class
         method_type <- "class"
         
-        prediction_title <- "Predicting Complete vs Missing Value Observations"
+        prediction_title <- "Predicting Missing vs Complete Observations"
       }
       
       rpart_model <- rpart(formula = missing_count ~ .,
@@ -1592,13 +1639,44 @@ shinyServer(function(input, output, session) {
         " | CP: ", input$rpart_cp
       )
       
-      rpart.plot::rpart.plot(rpart_model, 
+      if (input$rpart_plot_mode == "tree"){
+      
+      rpart.plot(rpart_model, 
                              shadow.col = "gray",
                              type = as.integer(input$rpart_type),
                              extra = ifelse(input$rpart_extra, 1, 0),
                              main = rpart_title,
                              sub = rpart_subtitle
                              )
+        
+        #Change plot and titles if variable importance is selected
+      } else if(input$rpart_plot_mode == "varimp"){
+        
+        #Creating dataframe of model importance features
+        imp_df <- data.frame(
+          Variable = names(rpart_model$variable.importance),
+          Importance = as.numeric(rpart_model$variable.importance)
+        )
+        
+        #Ordering imp_df by importance 
+        imp_df <- imp_df[order(imp_df$Importance, decreasing = TRUE), ]
+        
+        #Bar plot of importance by variable
+        ggplot(imp_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+          geom_col() +
+          coord_flip() +
+          labs(
+            title = "Variable Importance",
+            subtitle = missing_data_caption(),
+            x = "Variable",
+            y = "Importance"
+          ) +
+          theme_minimal() +
+          theme(
+            plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+            plot.subtitle = element_text(hjust = 0.5)
+          )
+      }
     })
 
     
@@ -1681,6 +1759,7 @@ shinyServer(function(input, output, session) {
       reset("rpart_extra")
       reset("rpart_exclude_vars")
       reset("rpart_target_type")
+      reset("rpart_plot_mode")
       
     })
     
@@ -1773,20 +1852,94 @@ shinyServer(function(input, output, session) {
     
 
 # =================================================================================
-# PROCESSING - OUTLIER VALUES 
+# PROCESSING - OUTLIER VALUES PLOTS
 # =================================================================================
-   
+   #Density plot 
+    #Density plot values that can be selected depend on processed_missing_reactive()
+    observe({
+      df <- processed_missing_reactive()
+      
+      req(df)
+      
+      #dropping missing_count
+      df$missing_count <-  NULL
+      
+      numeric_choices <- names(df)[sapply(df, is.numeric)]
+      
+      updatePickerInput(
+        session,
+        inputId = "selected_vars_numeric_outlier_density_plot",
+        choices = numeric_choices,
+        selected = numeric_choices
+      )
+
+    })
     
+    output$outlier_density_plot <- renderPlot({
+      df <- processed_outlier_reactive()
+      
+      req(df)
+
+      #Selected values from input
+      selected <- input$selected_vars_numeric_outlier_density_plot
+      
+      if (is.null(selected)){
+        plot.new()
+        text(0.5, 0.5, "No Variables Selected")
+        return()
+      }
+      
+      
+      # Setting plot layout
+      n <- length(selected)
+      ncol_plot <- ceiling(sqrt(n))
+      nrow_plot <- ceiling(n / ncol_plot)
+      
+      old_par <- par(no.readonly = TRUE)
+      on.exit(par(old_par))
+      
+      par(mfrow = c(nrow_plot, ncol_plot), mar = c(4, 4, 3, 1))
+      
+      for (var in selected) {
+        x <- df[[var]]
+        x <- x[!is.na(x)]
+        
+        if (length(x) < 2) {
+          plot.new()
+          title(main = var)
+          text(0.5, 0.5, "Not enough data")
+          next
+        }
+        
+        d <- density(x)
+        plot(
+          d,
+          main = paste("Density Plot:", var),
+          xlab = var,
+          ylab = "Density"
+        )
+      }
+    })
+# =================================================================================
+# PROCESSING - OUTLIER VALUES RESET INPUTS/EXPORT OPTIONS
+# =================================================================================  
     #Reset sidebar values
-    observeEvent(input$reset_input_outlier_processed, {
+    observeEvent(input$reset_input_outlier_processing, {
       reset_filters("outlier_processed")
+      reset("selected_vars_numeric_outlier_processing")
+      reset("selected_vars_categorical_outlier_processing")
       
     })
     
     #Reset only filter inputs
     observeEvent(input$reset_filter_input_outlier_processed, {
-      reset_filters("outlier_processed")
+      reset_filters("outlier_processing")
     }) 
+    
+    #Resetting density plot inputs
+    observeEvent(input$reset_density_outlier_plot, {
+      reset("selected_vars_numeric_outlier_density_plot")
+    })
     
     
     #Export options in datatable tab
