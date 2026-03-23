@@ -668,12 +668,12 @@ shinyUI(
                                         actionButton("reset_transform_variables", "Remove All Transformations")
                                       ),
 
-                                      #For selecting variables to be in dataset
-                                      accordion_panel(
-                                        "Select Variables",
-                                        select_variables_numeric_outlier_processing,
-                                        select_variables_categorical_outlier_processing
-                                      ),
+                                      # #For selecting variables to be in dataset
+                                      # accordion_panel(
+                                      #   "Select Variables",
+                                      #   select_variables_numeric_outlier_processing,
+                                      #   select_variables_categorical_outlier_processing
+                                      # ),
                                       
                                       #For filtering variables in dataset
                                       accordion_panel(

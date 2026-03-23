@@ -203,7 +203,83 @@ shinyServer(function(input, output, session) {
         
       
       
-      df
+        #Applying any tab filters
+        df <- filter_data(df, "outlier_processing")
+        
+        #Hashed out selecting columns manually in outlier section for now because it being buggy
+        # #Only returning selected columns from page inputs
+        # selected_vars <- unlist(c(
+        #   input$selected_vars_numeric_outlier_processing,
+        #   input$selected_vars_categorical_outlier_processing
+        # ), use.names = FALSE)
+        # 
+        # selected_vars <- intersect(selected_vars, names(df))
+        # 
+        # if (length(selected_vars) == 0) {
+        #   return(df)
+        # }
+        # df <- df %>% select(all_of(c(selected_vars, "missing_count")))
+        # 
+        
+        #Imputation changes for columns 
+        missing_value_imputations <- outlier_impute_settings()
+        
+        if (is.null(missing_value_imputations)) {
+          return(df)
+        }
+        
+        
+        for (imputation in missing_value_imputations) {
+          cols <- intersect(imputation[[2]], names(df))
+          if (length(cols) == 0) next
+          
+          if (imputation[[1]] == "Manual") {
+            for (col in cols) {
+              df[[col]][is.na(df[[col]])] <- imputation[[3]]
+            }
+          }
+          if (imputation[[1]] == "Median") {
+            for (col in cols) {
+              if (is.numeric(df[[col]])) {
+                med <- median(df[[col]], na.rm = TRUE)
+                df[[col]][is.na(df[[col]])] <- med
+              }
+            }
+          }
+          if (imputation[[1]] == "Mean") {
+            for (col in cols) {
+              if (is.numeric(df[[col]])) {
+                mean <- mean(df[[col]], na.rm = TRUE)
+                df[[col]][is.na(df[[col]])] <- mean
+              }
+            }
+          }
+          if (imputation[[1]] == "KNN") {
+            knn_cols <- cols[cols %in% names(df) & sapply(df[cols], is.numeric)]
+            
+            # remove columns with no observed values
+            knn_cols <- knn_cols[colSums(!is.na(df[knn_cols])) > 0]
+            
+            if (length(knn_cols) > 0) {
+              temp <- df[, knn_cols, drop = FALSE]
+              na_mask <- is.na(temp)
+              
+              if (any(na_mask)) {
+                temp_imputed <- VIM::kNN(
+                  temp,
+                  variable = knn_cols,
+                  k = input$knn_neighbours,
+                  imp_var = FALSE
+                )
+                for (col in knn_cols) {
+                  df[[col]][na_mask[, col]] <- temp_imputed[[col]][na_mask[, col]]
+                }
+              }
+            }
+          }
+        }
+        
+        df
       
     })
     
@@ -237,92 +313,92 @@ shinyServer(function(input, output, session) {
     
     #Second stage of pipeline - dependant on processed_missing_reactive
     #Base reactive table without any imputations applied
-    processed_outlier_reactive <-  reactive({
-      
-      #Takes result of missing processing section and goes from there
-      df <- processed_missing_reactive()
-
-      #Applying any tab filters
-      df <- filter_data(df, "outlier_processing")
-      
-      #Only returning selected columns from page inputs
-      selected_vars <- unlist(c(
-        input$selected_vars_numeric_outlier_processing,
-        input$selected_vars_categorical_outlier_processing
-      ), use.names = FALSE)
-      
-      selected_vars <- intersect(selected_vars, names(df))
-      
-      if (length(selected_vars) == 0) {
-        return(df)
-      }
-      df <- df %>% select(all_of(selected_vars))
-      
-      
-      #Imputation changes for columns 
-      missing_value_imputations <- outlier_impute_settings()
-      
-      if (is.null(missing_value_imputations)) {
-        return(df)
-      }
-      
-
-      for (imputation in missing_value_imputations) {
-        cols <- intersect(imputation[[2]], names(df))
-        if (length(cols) == 0) next
-        
-        if (imputation[[1]] == "Manual") {
-          for (col in cols) {
-            df[[col]][is.na(df[[col]])] <- imputation[[3]]
-          }
-        }
-        if (imputation[[1]] == "Median") {
-          for (col in cols) {
-            if (is.numeric(df[[col]])) {
-              med <- median(df[[col]], na.rm = TRUE)
-              df[[col]][is.na(df[[col]])] <- med
-            }
-          }
-        }
-        if (imputation[[1]] == "Mean") {
-          for (col in cols) {
-            if (is.numeric(df[[col]])) {
-              mean <- mean(df[[col]], na.rm = TRUE)
-              df[[col]][is.na(df[[col]])] <- mean
-            }
-          }
-        }
-        if (imputation[[1]] == "KNN") {
-          knn_cols <- cols[cols %in% names(df) & sapply(df[cols], is.numeric)]
-          
-          # remove columns with no observed values
-          knn_cols <- knn_cols[colSums(!is.na(df[knn_cols])) > 0]
-          
-          if (length(knn_cols) > 0) {
-            temp <- df[, knn_cols, drop = FALSE]
-            na_mask <- is.na(temp)
-            
-            if (any(na_mask)) {
-              temp_imputed <- VIM::kNN(
-                temp,
-                variable = knn_cols,
-                k = input$knn_neighbours,
-                imp_var = FALSE
-              )
-              for (col in knn_cols) {
-                df[[col]][na_mask[, col]] <- temp_imputed[[col]][na_mask[, col]]
-              }
-            }
-          }
-        }
-       }
-      
-      df
-    })
+    # processed_outlier_reactive <-  reactive({
+    #   
+    #   #Takes result of missing processing section and goes from there
+    #   df <- processed_missing_reactive()
+    # 
+    #   #Applying any tab filters
+    #   df <- filter_data(df, "outlier_processing")
+    #   
+    #   #Only returning selected columns from page inputs
+    #   selected_vars <- unlist(c(
+    #     input$selected_vars_numeric_outlier_processing,
+    #     input$selected_vars_categorical_outlier_processing
+    #   ), use.names = FALSE)
+    #   
+    #   selected_vars <- intersect(selected_vars, names(df))
+    #   
+    #   if (length(selected_vars) == 0) {
+    #     return(df)
+    #   }
+    #   df <- df %>% select(all_of(selected_vars))
+    #   
+    #   
+    #   #Imputation changes for columns 
+    #   missing_value_imputations <- outlier_impute_settings()
+    #   
+    #   if (is.null(missing_value_imputations)) {
+    #     return(df)
+    #   }
+    #   
+    # 
+    #   for (imputation in missing_value_imputations) {
+    #     cols <- intersect(imputation[[2]], names(df))
+    #     if (length(cols) == 0) next
+    #     
+    #     if (imputation[[1]] == "Manual") {
+    #       for (col in cols) {
+    #         df[[col]][is.na(df[[col]])] <- imputation[[3]]
+    #       }
+    #     }
+    #     if (imputation[[1]] == "Median") {
+    #       for (col in cols) {
+    #         if (is.numeric(df[[col]])) {
+    #           med <- median(df[[col]], na.rm = TRUE)
+    #           df[[col]][is.na(df[[col]])] <- med
+    #         }
+    #       }
+    #     }
+    #     if (imputation[[1]] == "Mean") {
+    #       for (col in cols) {
+    #         if (is.numeric(df[[col]])) {
+    #           mean <- mean(df[[col]], na.rm = TRUE)
+    #           df[[col]][is.na(df[[col]])] <- mean
+    #         }
+    #       }
+    #     }
+    #     if (imputation[[1]] == "KNN") {
+    #       knn_cols <- cols[cols %in% names(df) & sapply(df[cols], is.numeric)]
+    #       
+    #       # remove columns with no observed values
+    #       knn_cols <- knn_cols[colSums(!is.na(df[knn_cols])) > 0]
+    #       
+    #       if (length(knn_cols) > 0) {
+    #         temp <- df[, knn_cols, drop = FALSE]
+    #         na_mask <- is.na(temp)
+    #         
+    #         if (any(na_mask)) {
+    #           temp_imputed <- VIM::kNN(
+    #             temp,
+    #             variable = knn_cols,
+    #             k = input$knn_neighbours,
+    #             imp_var = FALSE
+    #           )
+    #           for (col in knn_cols) {
+    #             df[[col]][na_mask[, col]] <- temp_imputed[[col]][na_mask[, col]]
+    #           }
+    #         }
+    #       }
+    #     }
+    #    }
+    #   
+    #   df
+    # })
     
     #Impute missing variables options change depending on processed_missing_reactive()
     observe({
-      df <- processed_outlier_reactive()
+      df <- processed_missing_reactive()
       
       req(df)
       
@@ -339,9 +415,9 @@ shinyServer(function(input, output, session) {
       )
     })
     
-    #Transform variables options change depending on processed_outlier_reactive()
+    #Transform variables options change depending on processed_missing_reactive()
     observe({
-      df <- processed_outlier_reactive()
+      df <- processed_missing_reactive()
       
       req(df)
       
@@ -391,7 +467,7 @@ shinyServer(function(input, output, session) {
     
     #Reactive data table for checking data in processing data section
     output$outlier_processing_reactive_table <- renderDataTable({
-      processed_outlier_reactive()
+      processed_missing_reactive()
     })
     
   # ================================================================================
@@ -2006,7 +2082,7 @@ shinyServer(function(input, output, session) {
     })
     
     output$outlier_density_plot <- renderPlot({
-      df <- processed_outlier_reactive()
+      df <- processed_missing_reactive()
       req(df)
 
       #Selected values from input
@@ -2104,7 +2180,7 @@ shinyServer(function(input, output, session) {
       
       content = function(file) {
         # Write the content to a temporary file path provided by Shiny
-        write.csv(processed_outlier_reactive(), file, row.names = FALSE)
+        write.csv(processed_missing_reactive(), file, row.names = FALSE)
       }
     )
     
@@ -2117,7 +2193,7 @@ shinyServer(function(input, output, session) {
       
       content = function(file) {
         # Write the content to a temporary file path provided by Shiny
-        write.xlsx(processed_outlier_reactive(), file)
+        write.xlsx(processed_missing_reactive(), file)
       }
     )
     
@@ -2130,7 +2206,7 @@ shinyServer(function(input, output, session) {
       
       content = function(file) {
         # Write the content to a temporary file path provided by Shiny
-        write_sav(processed_outlier_reactive(), file)
+        write_sav(processed_missing_reactive(), file)
       }
     )
     
@@ -2142,7 +2218,7 @@ shinyServer(function(input, output, session) {
       
       content = function(file) {
         # Write the content to a temporary file path provided by Shiny
-        write_tsv(processed_outlier_reactive(), file)
+        write_tsv(processed_missing_reactive(), file)
       }
     )
     
@@ -2153,7 +2229,7 @@ shinyServer(function(input, output, session) {
       },
       
       content = function(file){
-        saveRDS(processed_outlier_reactive(), file)
+        saveRDS(processed_missing_reactive(), file)
       }
     )
     
