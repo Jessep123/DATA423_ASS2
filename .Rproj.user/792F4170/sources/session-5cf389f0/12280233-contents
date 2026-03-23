@@ -335,6 +335,7 @@ shinyUI(
     navbarMenu("Data Processing",
                tabPanel("Introduction"), #Fill this out with info explaining processing module
                tabPanel("Missing Values",
+                        value = "missing_tab",
                         layout_sidebar(
                           sidebar = sidebar(
                             title = "Fuck around and find out I guess",
@@ -492,7 +493,7 @@ shinyUI(
                                                          column(4, pickerInput("rpart_exclude_vars", "Exclude Variables",
                                                                                choices = NULL, multiple = TRUE)),
                                                          selectInput("rpart_target_type", "Target Type",
-                                                                     choices = c("# Missing Values", "Binary (Missing/Not Missing"),
+                                                                     choices = c("# Missing Values", "Binary (Missing/Not Missing)"),
                                                                      selected = "# Missing Values")
 
                                                        ),
@@ -613,6 +614,7 @@ shinyUI(
                         )
                   ),
                tabPanel("Outliers",
+                        value = "outlier_tab",
                         layout_sidebar(
                           sidebar = sidebar(
                             title = "Fuck around and find out I guess - outlier edition",
@@ -621,6 +623,51 @@ shinyUI(
 
                             accordion(open = FALSE,
                                       
+                                      #Controls to impute/adjust missing values
+                                      accordion_panel(
+                                        "Impute Missing Values",
+                                        select_variables_impute_missing,
+                                        conditionalPanel(
+                                          condition = "input.missing_imputate_method == 'KNN'",
+                                          p("NOTE - KNN Requires Multiple Columns", style = "color:red;")
+                                        ),
+                                        pickerInput(inputId = "missing_imputate_method",
+                                                    label = "Select Imputation Method",
+                                                    choices = c("Manual", "KNN", "Median","Mean"),
+                                                    selected = NULL,
+                                                    multiple = FALSE),
+                                        conditionalPanel(
+                                          condition = "input.missing_imputate_method == 'Manual'",
+                                          numericInput(
+                                            "missing_impute_manual_value",
+                                            "Value to Replace NA",
+                                            value = 0
+                                          )
+                                        ),
+                                          conditionalPanel(
+                                            condition = "input.missing_imputate_method == 'KNN'",
+                                            numericInput(
+                                              "knn_neighbours",
+                                              "Number of k Nearest Neighbours",
+                                              value = 5
+                                            )
+                                        ),
+                                        actionButton("impute_missing_values", "Apply"),
+                                        actionButton("reset_missing_imputes", "Remove All Imputes")
+                                      ),
+                                      
+                                      accordion_panel(
+                                        "Transform Variables",
+                                        select_variables_transform,
+                                        pickerInput(inputId = "transform_variable_method",
+                                                    label = "Select Transformation Method",
+                                                    choices = c("Box-Cox", "Yeo-Johnson"),
+                                                    selected = NULL,
+                                                    multiple = FALSE),
+                                        actionButton("transform_variables", "Apply"),
+                                        actionButton("reset_transform_variables", "Remove All Transformations")
+                                      ),
+
                                       #For selecting variables to be in dataset
                                       accordion_panel(
                                         "Select Variables",
@@ -664,6 +711,17 @@ shinyUI(
                                                                    )
                                                                  )),
                                                           column(4,
+                                                                 pickerInput(
+                                                            inputId = "outlier_density_colourby",
+                                                            label = "Colour By (Optional)",
+                                                            choices = c("None", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                            selected = "None",
+                                                            multiple = FALSE,
+                                                            options = list(
+                                                              `live-search` = TRUE
+                                                            )
+                                                          )),
+                                                          column(4,
                                                                  div(
                                                                    style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
                                                                    actionButton(
@@ -701,7 +759,10 @@ shinyUI(
                       ),#End of outlier tab panel
                
                
-               tabPanel("Processed Data Summary")
+               tabPanel("Data Processing"),
+               
+               
+               tabPanel("GLM Net Model")
                
     ),
 

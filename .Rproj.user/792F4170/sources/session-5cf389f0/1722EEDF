@@ -3,7 +3,7 @@
     "path": "C:/Users/jessep.LAPTOP-7GPOPVDF/Desktop/R Projects/DATA423/ass2/global.r",
     "project_path": "global.r",
     "type": "r_source",
-    "hash": "0",
+    "hash": "2400930497",
     "contents": "",
     "dirty": false,
     "created": 1773627392729.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "345,47",
-        "scrollLine": "341"
+        "cursorPosition": "32,11",
+        "scrollLine": "23"
     },
     "folds": "",
-    "lastKnownWriteTime": 1774147213,
+    "lastKnownWriteTime": 1774246733,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1774147213947,
+    "last_content_update": 1774246733570,
     "read_only": false,
     "read_only_alternatives": []
 }

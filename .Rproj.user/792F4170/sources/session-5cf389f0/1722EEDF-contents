@@ -30,6 +30,7 @@ library(corrplot)
 library(naniar)
 library(rpart)
 library(rpart.plot)
+library(VIM)
 
 
 #Data without any changes made to it
@@ -44,7 +45,7 @@ data <- read.csv('Ass2Data.csv',
 data[data == "--"] <- NA
 
 #ANy numeric variable value < 0 turned to NULL 
-data[data < 0] <- NA
+data[data < -1] <- NA
 
 # # convert away from factor
 # data$GOVERN_TYPE <-  as.character(data$GOVERN_TYPE)
@@ -355,11 +356,33 @@ select_variables_numeric_outlier_processing <- pickerInput(
   )
 )
 
-
-
 select_variables_categorical_outlier_processing <- pickerInput(
   inputId = "selected_vars_categorical_outlier_processing",
   label = "Categorical Variables",
+  choices = NULL,
+  selected = NULL,
+  multiple = TRUE,
+  options = list(
+    `actions-box` = TRUE,  
+    `live-search` = TRUE    
+  )
+)
+
+select_variables_impute_missing <- pickerInput(
+  inputId = "selected_vars_impute_missing",
+  label = "Select Variable",
+  choices = NULL,
+  selected = NULL,
+  multiple = TRUE,
+  options = list(
+    `actions-box` = TRUE,  
+    `live-search` = TRUE    
+  )
+)
+
+select_variables_transform <- pickerInput(
+  inputId = "selected_vars_transform",
+  label = "Select Variable",
   choices = NULL,
   selected = NULL,
   multiple = TRUE,

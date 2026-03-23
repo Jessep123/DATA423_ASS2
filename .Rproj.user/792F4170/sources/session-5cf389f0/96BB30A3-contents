@@ -236,6 +236,7 @@ shinyServer(function(input, output, session) {
     
     
     #Second stage of pipeline - dependant on processed_missing_reactive
+    #Base reactive table without any imputations applied
     processed_outlier_reactive <-  reactive({
       
       #Takes result of missing processing section and goes from there
@@ -249,10 +250,139 @@ shinyServer(function(input, output, session) {
         input$selected_vars_numeric_outlier_processing,
         input$selected_vars_categorical_outlier_processing
       ), use.names = FALSE)
+      
+      selected_vars <- intersect(selected_vars, names(df))
+      
+      if (length(selected_vars) == 0) {
+        return(df)
+      }
       df <- df %>% select(all_of(selected_vars))
+      
+      
+      #Imputation changes for columns 
+      missing_value_imputations <- outlier_impute_settings()
+      
+      if (is.null(missing_value_imputations)) {
+        return(df)
+      }
+      
+
+      for (imputation in missing_value_imputations) {
+        cols <- intersect(imputation[[2]], names(df))
+        if (length(cols) == 0) next
+        
+        if (imputation[[1]] == "Manual") {
+          for (col in cols) {
+            df[[col]][is.na(df[[col]])] <- imputation[[3]]
+          }
+        }
+        if (imputation[[1]] == "Median") {
+          for (col in cols) {
+            if (is.numeric(df[[col]])) {
+              med <- median(df[[col]], na.rm = TRUE)
+              df[[col]][is.na(df[[col]])] <- med
+            }
+          }
+        }
+        if (imputation[[1]] == "Mean") {
+          for (col in cols) {
+            if (is.numeric(df[[col]])) {
+              mean <- mean(df[[col]], na.rm = TRUE)
+              df[[col]][is.na(df[[col]])] <- mean
+            }
+          }
+        }
+        if (imputation[[1]] == "KNN") {
+          knn_cols <- cols[cols %in% names(df) & sapply(df[cols], is.numeric)]
+          
+          # remove columns with no observed values
+          knn_cols <- knn_cols[colSums(!is.na(df[knn_cols])) > 0]
+          
+          if (length(knn_cols) > 0) {
+            temp <- df[, knn_cols, drop = FALSE]
+            na_mask <- is.na(temp)
+            
+            if (any(na_mask)) {
+              temp_imputed <- VIM::kNN(
+                temp,
+                variable = knn_cols,
+                k = input$knn_neighbours,
+                imp_var = FALSE
+              )
+              for (col in knn_cols) {
+                df[[col]][na_mask[, col]] <- temp_imputed[[col]][na_mask[, col]]
+              }
+            }
+          }
+        }
+       }
       
       df
     })
+    
+    #Impute missing variables options change depending on processed_missing_reactive()
+    observe({
+      df <- processed_outlier_reactive()
+      
+      req(df)
+      
+      #dropping missing_count
+      df$missing_count <-  NULL
+      
+      choices <- names(df)[colSums(is.na(df)) > 0]
+      
+      updatePickerInput(
+        session,
+        inputId = "selected_vars_impute_missing",
+        choices = choices,
+        selected = NULL
+      )
+    })
+    
+    #Transform variables options change depending on processed_outlier_reactive()
+    observe({
+      df <- processed_outlier_reactive()
+      
+      req(df)
+      
+      #dropping missing_count
+      df$missing_count <-  NULL
+      
+      choices <- names(df[, sapply(df, is.numeric)])
+      
+      updatePickerInput(
+        session,
+        inputId = "selected_vars_transform",
+        choices = choices,
+        selected = NULL
+      )
+    })
+    
+    #List of imputation changes for reactive dataset
+    outlier_impute_settings <- reactiveVal(list())
+    
+    #Everytime apply is selected, add specified imputation 
+    observeEvent(input$impute_missing_values, {
+      current_steps <- outlier_impute_settings()
+      
+      new_step <- list(
+        method <-  input$missing_imputate_method,
+        cols <-  input$selected_vars_impute_missing,
+        manual_val <-  input$missing_impute_manual_value,
+        knn_neighbours <- input$knn_neighbours
+      )
+
+      
+      outlier_impute_settings(append(current_steps, list(new_step)))
+    })
+    
+    
+    #Event to reset imputations
+    observeEvent(input$reset_missing_imputes, {
+      outlier_impute_settings(list())
+    })
+    
+    #ADD IN EVENTS/OBSERVATIONS FOR TRANSFORMING VARIABLES HERE
     
     #Reactive data table for checking data in processing data section
     output$missing_processing_reactive_table <- renderDataTable({
@@ -1609,7 +1739,7 @@ shinyServer(function(input, output, session) {
       prediction_title <- "Predicting Number of Missing Values Per Observation"
       
       #Special condition for binary classification
-      if (input$rpart_target_type == "Binary (Missing/Not Missing"){
+      if (input$rpart_target_type == "Binary (Missing/Not Missing)"){
         
         #Converting missing_count to binary Missing/No missing
         df$missing_count <- factor(
@@ -1877,49 +2007,70 @@ shinyServer(function(input, output, session) {
     
     output$outlier_density_plot <- renderPlot({
       df <- processed_outlier_reactive()
-      
       req(df)
 
       #Selected values from input
       selected <- input$selected_vars_numeric_outlier_density_plot
       
-      if (is.null(selected)){
+      #By default colour_by is selected value
+      colour_by <- input$outlier_density_colourby
+      
+      #If colour_by is none, change it to NULL
+      if (colour_by == "None") {
+      colour_by <- NULL
+      } 
+      
+      #Pivotting data to only have value/variable + colour variable 
+      df_pivot <- df %>%
+        select(all_of(c(selected, colour_by))) %>%
+        pivot_longer(
+          cols = all_of(selected),
+          names_to = "Variable",
+          values_to = "Value"
+        ) %>%
+        filter(!is.na(Value), is.finite(Value))
+      
+      # If everything got filtered out
+      if (nrow(df_pivot) == 0) {
         plot.new()
-        text(0.5, 0.5, "No Variables Selected")
+        text(0.5, 0.5, "No valid data")
         return()
       }
       
-      
-      # Setting plot layout
-      n <- length(selected)
-      ncol_plot <- ceiling(sqrt(n))
-      nrow_plot <- ceiling(n / ncol_plot)
-      
-      old_par <- par(no.readonly = TRUE)
-      on.exit(par(old_par))
-      
-      par(mfrow = c(nrow_plot, ncol_plot), mar = c(4, 4, 3, 1))
-      
-      for (var in selected) {
-        x <- df[[var]]
-        x <- x[!is.na(x)]
+      # Base plot if no colour_by variable selected
+      if (is.null(colour_by)) {
         
-        if (length(x) < 2) {
-          plot.new()
-          title(main = var)
-          text(0.5, 0.5, "Not enough data")
-          next
-        }
+        ggplot(df_pivot, aes(x = Value)) +
+          geom_density(fill = "steelblue", alpha = 0.6) +
+          facet_wrap(~ Variable, scales = "free") +
+          labs(
+            title = "Density Plots",
+            x = "Value",
+            y = "Density"
+          ) +
+          theme_minimal() +
+          theme(plot.title = element_text(hjust = 0.5, face = "bold"))
         
-        d <- density(x)
-        plot(
-          d,
-          main = paste("Density Plot:", var),
-          xlab = var,
-          ylab = "Density"
-        )
-      }
+      } else {
+        ggplot(df_pivot, aes(
+      x = Value,
+      fill = .data[[colour_by]],
+      colour = .data[[colour_by]]
+    )) +
+      geom_density(alpha = 0.4) +
+      facet_wrap(~ Variable, scales = "free") +
+      labs(
+        title = paste("Density Plots by", colour_by),
+        x = "Value",
+        y = "Density",
+        fill = colour_by,
+        colour = colour_by
+      ) +
+      theme_minimal() +
+      theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  }
     })
+
 # =================================================================================
 # PROCESSING - OUTLIER VALUES RESET INPUTS/EXPORT OPTIONS
 # =================================================================================  
@@ -1939,6 +2090,7 @@ shinyServer(function(input, output, session) {
     #Resetting density plot inputs
     observeEvent(input$reset_density_outlier_plot, {
       reset("selected_vars_numeric_outlier_density_plot")
+      reset("outlier_density_colourby")
     })
     
     
