@@ -1798,6 +1798,18 @@ shinyServer(function(input, output, session) {
       )
     })
     
+    observe({
+      df <- processed_missing_reactive()
+      
+      valid_cols <- names(df)[!names(df) %in% c("missing_count", "CODE", "OBS_TYPE")]
+      
+      updatePickerInput(
+        session,
+        "rpart_binary_predict",
+        choices = valid_cols
+      )
+    })
+    
     #rpart plot
     output$rpart <- renderPlot({
       df <- processed_missing_reactive()
@@ -1817,15 +1829,34 @@ shinyServer(function(input, output, session) {
       #Special condition for binary classification
       if (input$rpart_target_type == "Binary (Missing/Not Missing)"){
         
+        #Default title 
+        prediction_title <- "Predicting Missing vs Complete Observations"
+        
+        if(is.null(input$rpart_binary_predict)){
         #Converting missing_count to binary Missing/No missing
         df$missing_count <- factor(
           ifelse(df$missing_count > 0, "Missing", "Complete")
-        )        
+        )}
+        
+      else{
+          cols <- input$rpart_binary_predict
+          cols <- intersect(cols, names(df))
+          req(length(cols) > 0)
+          
+          df$missing_count <- factor(
+            ifelse(rowSums(is.na(df[, cols, drop = FALSE])) > 0,
+                   "Missing",
+                   "Complete")
+          )     
+          
+          prediction_title <-  paste0("Predicting Missing Values for ", input$rpart_binary_predict)
+          }
+      
         
         #Converting method_type to class
         method_type <- "class"
         
-        prediction_title <- "Predicting Missing vs Complete Observations"
+        
       }
       
       rpart_model <- rpart(formula = missing_count ~ .,

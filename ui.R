@@ -511,6 +511,15 @@ shinyUI(
                                                            )
                                                          ),
                                                          
+                                                         conditionalPanel(
+                                                           condition = "input.rpart_target_type == 'Binary (Missing/Not Missing)'",
+                                                         column(
+                                                           4,
+                                                           pickerInput("rpart_binary_predict", "Columns to Predict",
+                                                                       choices = NULL, multiple = TRUE)
+                                                         )
+                                                       ),
+                                                         
                                                          column(4,
                                                                 div(
                                                                   style = "display: flex; justify-content: flex-end;",
