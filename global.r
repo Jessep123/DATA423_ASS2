@@ -3,6 +3,7 @@ library(shiny)
 library(shinyjs)
 library(bslib)
 library(ggplot2)
+library(rlang)
 # install.packages("DT")
 library(DT)
 library(dplyr)
@@ -31,7 +32,10 @@ library(naniar)
 library(rpart)
 library(rpart.plot)
 library(VIM)
-
+library(recipes)
+library(dbscan)
+library(ggrepel)
+library(isotree)
 
 #Data without any changes made to it
 data_og <-  read.csv('Ass2Data.csv',
@@ -390,4 +394,20 @@ select_variables_transform <- pickerInput(
     `actions-box` = TRUE,  
     `live-search` = TRUE    
   )
+)
+
+#Method lABELS FOR processing section 
+methods <- c(
+  remove_na_rows = "Remove Rows with NAs",
+  remove_na_cols = "Remove Columns with NAs",
+  impute_median  = "Impute Median",
+  impute_mean    = "Impute Mean",
+  impute_knn     = "Impute KNN",
+  impute_manual  = "Impute Manual Value",
+  boxcox         = "Transform — Box-Cox",
+  yeojohnson     = "Transform — Yeo-Johnson",
+  scale          = "Scale",
+  center          = "Center",
+  nzv            = "Remove Near-Zero Variance",
+  lincomb        = "Remove Linear Combos"
 )

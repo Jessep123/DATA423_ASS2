@@ -483,51 +483,68 @@ shinyUI(
                                      accordion_panel("Chart Controls", 
                                                      chart_console(
                                                        fluidRow(
-                                                         column(4, sliderInput("rpart_maxdepth", "Max Depth", 1, 10, 5)),
-                                                         column(4, sliderInput("rpart_cp", "Pruning (cp)", 0.001, 0.1, 0.01, step = 0.01)),
-                                                         column(4, sliderInput("rpart_minsplit", "Min Split", 10, 100, 20))
-                                                       ),
-                                                       
-                                                       fluidRow(
-                                                         column(4, selectInput("rpart_type", "Layout", c("Standard"=2, "Vertical"=3))),
-                                                         column(4, pickerInput("rpart_exclude_vars", "Exclude Variables",
-                                                                               choices = NULL, multiple = TRUE)),
-                                                         selectInput("rpart_target_type", "Target Type",
-                                                                     choices = c("# Missing Values", "Binary (Missing/Not Missing)"),
-                                                                     selected = "# Missing Values")
-
-                                                       ),
-                                                       fluidRow(
-                                                         column(4, checkboxInput("rpart_extra", "Show Extra Info", TRUE)),
-                                                         
                                                          column(
-                                                           4,
-                                                           radioButtons(
-                                                             "rpart_plot_mode",
-                                                             "Display",
-                                                             choices = c("Tree" = "tree", "Variable Importance" = "varimp"),
-                                                             selected = "tree",
-                                                             inline = TRUE
+                                                           10,
+                                                           
+                                                           fluidRow(
+                                                             column(4, sliderInput("rpart_maxdepth", "Max Depth", 1, 10, 5)),
+                                                             column(4, sliderInput("rpart_cp", "Pruning (cp)", 0.001, 0.1, 0.01, step = 0.01)),
+                                                             column(4, sliderInput("rpart_minsplit", "Min Split", 10, 100, 20))
+                                                           ),
+                                                           
+                                                           fluidRow(
+                                                             column(4, selectInput("rpart_type", "Layout", c("Standard" = 2, "Vertical" = 3))),
+                                                             column(4, pickerInput("rpart_exclude_vars", "Exclude Variables",
+                                                                                   choices = NULL, multiple = TRUE)),
+                                                             column(
+                                                               4,
+                                                               selectInput(
+                                                                 "rpart_target_type",
+                                                                 "Target Type",
+                                                                 choices = c("# Missing Values", "Binary (Missing/Not Missing)"),
+                                                                 selected = "# Missing Values"
+                                                               )
+                                                             )
+                                                           ),
+                                                           
+                                                           fluidRow(
+                                                             column(4, checkboxInput("rpart_extra", "Show Extra Info", TRUE)),
+                                                             
+                                                             column(
+                                                               4,
+                                                               radioButtons(
+                                                                 "rpart_plot_mode",
+                                                                 "Display",
+                                                                 choices = c("Tree" = "tree", "Variable Importance" = "varimp"),
+                                                                 selected = "tree",
+                                                                 inline = TRUE
+                                                               )
+                                                             ),
+                                                             
+                                                             column(
+                                                               4,
+                                                               conditionalPanel(
+                                                                 condition = "input.rpart_target_type == 'Binary (Missing/Not Missing)'",
+                                                                 pickerInput(
+                                                                   "rpart_binary_predict",
+                                                                   "Columns to Predict",
+                                                                   choices = NULL,
+                                                                   multiple = TRUE
+                                                                 )
+                                                               )
+                                                             )
                                                            )
                                                          ),
                                                          
-                                                         conditionalPanel(
-                                                           condition = "input.rpart_target_type == 'Binary (Missing/Not Missing)'",
                                                          column(
-                                                           4,
-                                                           pickerInput("rpart_binary_predict", "Columns to Predict",
-                                                                       choices = NULL, multiple = TRUE)
-                                                         )
-                                                       ),
-                                                         
-                                                         column(4,
-                                                                div(
-                                                                  style = "display: flex; justify-content: flex-end;",
-                                                                  actionButton("reset_rpart_plot", "Reset Plot Adjustments")
-                                                                )
+                                                           2,
+                                                           div(
+                                                             style = "height: 100%; display: flex;justify-content: center;align-items: center;padding-top: 25px;",
+                                                             actionButton("reset_rpart_plot", "Reset Plot Adjustments")
+                                                           )
                                                          )
                                                        )
-                                                     )                                  
+                                                     )                                 
                                                      )
                                    )
                                    
@@ -629,6 +646,13 @@ shinyUI(
                             title = "Fuck around and find out I guess - outlier edition",
                             
                             actionButton("reset_input_outlier_processing","Reset Inputs"),
+                            
+                                checkboxInput("center_data_outlier",
+                                              "Center Data",
+                                              value = FALSE),
+                                checkboxInput("scale_data_outlier",
+                                              "Scale Data",
+                                              value = FALSE),
 
                             accordion(open = FALSE,
                                       
@@ -677,12 +701,6 @@ shinyUI(
                                         actionButton("reset_transform_variables", "Remove All Transformations")
                                       ),
 
-                                      # #For selecting variables to be in dataset
-                                      # accordion_panel(
-                                      #   "Select Variables",
-                                      #   select_variables_numeric_outlier_processing,
-                                      #   select_variables_categorical_outlier_processing
-                                      # ),
                                       
                                       #For filtering variables in dataset
                                       accordion_panel(
@@ -702,7 +720,7 @@ shinyUI(
                           
                           tabsetPanel(
                           tabPanel("Variable Density",
-                                   plotOutput("outlier_density_plot")),
+                                   plotOutput("outlier_density_plot"),
                             accordion(open = FALSE,
                                       accordion_panel("Chart Controls", 
                                                       chart_console(
@@ -732,14 +750,161 @@ shinyUI(
                                                           )),
                                                           column(4,
                                                                  div(
-                                                                   style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
+                                                                   style = "display: flex;justify-content: center ;align-items: center;height: 100%;",
                                                                    actionButton(
                                                                      "reset_density_outlier_plot",
                                                                      "Reset"
                                                                    )
                                                                  )
                                                           )
-                                                        )))),
+                                                        ))))),
+                          tabPanel("Boxplot",
+                                   plotlyOutput("boxplot_outlier"),
+                                       
+                                       accordion(open = FALSE,
+                                                 accordion_panel("Chart Controls",
+                                                 chart_console(
+                                                   fluidRow(
+                                                     column(4,
+                                                            pickerInput(
+                                                              inputId = "selected_vars_boxplot_outlier",
+                                                              label = "Manually Select Variables to Plot",
+                                                              choices = names(data),
+                                                              selected = NULL,
+                                                              multiple = TRUE,
+                                                              options = list(
+                                                                `actions-box` = TRUE,
+                                                                `live-search` = TRUE
+                                                              )
+                                                            )), 
+                                                     
+                                                     conditionalPanel(
+                                                             condition = "input.selected_vars_boxplot_outlier.length == 1",
+                                                                       pickerInput(
+                                                                           inputId = "colour_by_boxplot_outlier",
+                                                                           label = "Colour By (Single Selected Variable Only)",
+                                                                           choices = c("GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                                           selected = NULL,
+                                                                           multiple = TRUE,
+                                                                           options = list(
+                                                                             `actions-box` = TRUE,
+                                                                             `live-search` = TRUE
+                                                                           )
+                                                                         )
+                                                 
+                                                   )
+                                                 ),
+                                                 fluidRow(
+                                                   column(4,
+                                                          sliderInput("iqr_outlier", 
+                                                                                      "Interquartile Range Multiplier",
+                                                                                      min = 0.1,
+                                                                                      max = 3,
+                                                                                      value = 1.5),)
+                                                 ),
+                                                 
+                                                 
+                                                 fluidRow(
+                                                   column(4,
+                                                          div(
+                                                            style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
+                                                            actionButton(
+                                                              "reset_plot_input_boxplot_outlier",
+                                                              "Reset Plot Adjustments"
+                                                            )
+                                                          )
+                                                 )
+                                                 )
+                                                 
+                                                 
+                                       )
+                                                 ))
+                                       
+                          ),
+                                
+                          tabPanel("Outlier Patterns",
+                                   plotOutput("outlier_pattern"),
+                                   
+                                   accordion(open = FALSE,
+                                             accordion_panel("Chart Controls",
+                                             chart_console(
+                                               pickerInput(
+                                                 inputId = "outlier_distance_method_plot",
+                                                 label = "Select Distance Method",
+                                                 choices = c("Mahalanobis", "Local Outlier Factors", "Isolation Forest"),
+                                                 selected = "Isolation Forest",
+                                                 multiple = FALSE,
+                                                 options = list(
+                                                   `actions-box` = TRUE,
+                                                   `live-search` = TRUE
+                                                 )
+                                               ),
+                                               
+                                               
+                                               
+                                               # Conditional panels below
+                                               conditionalPanel(
+                                                 condition = "input.outlier_distance_method_plot == 'Mahalanobis'",
+                                                 pickerInput(
+                                                   inputId = "selected_var_mahal",
+                                                   label = "Select Variable",
+                                                   choices = NULL,
+                                                   selected = NULL,
+                                                   multiple = TRUE,
+                                                   options = list(
+                                                     `actions-box` = TRUE,
+                                                     `live-search` = TRUE
+                                                   )
+                                                 ),
+                                                 sliderInput("mahal_threshold", 
+                                                             "Chi-Squared Quantile Threshold",
+                                                             min = 0.90, max = 0.999, value = 0.975, step = 0.001),
+                                                 checkboxInput("maha_robust",
+                                                               "Make it Robust",
+                                                               value = FALSE)
+                                               ),
+                                               
+                                               conditionalPanel(
+                                                 condition = "input.outlier_distance_method_plot == 'Local Outlier Factors'",
+                                                 numericInput(
+                                                   inputId = "lof_min_points",
+                                                   label = "Minimum Points",
+                                                   value = 4, 
+                                                   min = 1, 
+                                                   max = 10
+                                                 ),
+                                                 numericInput(
+                                                   "lof_threshold",
+                                                   "Outlier Threshold",
+                                                   value = 2, 
+                                                   min = 1, 
+                                                   max = 10 
+                                                 )
+                                               ),
+                                               conditionalPanel(
+                                                 condition = "input.outlier_distance_method_plot == 'Isolation Forest'",
+                                                 numericInput(
+                                                   "iso_for_threshold",
+                                                   "Threshold",
+                                                   value = 0.45, 
+                                                   min = 0, 
+                                                   max = 1 
+                                                 )
+                                               ),
+                                               div(
+                                                 style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
+                                                 actionButton(
+                                                   "reset_plot_input_outlier_pattern",
+                                                   "Reset Plot Adjustments"
+                                                 )
+                                               )
+                                             )
+
+                                             
+                                   ))
+                          ),     
+                                   
+                          
                           tabPanel("Data Table Export",
                                    div(
                                      style = "margin-bottom: 24px;",
@@ -768,7 +933,53 @@ shinyUI(
                       ),#End of outlier tab panel
                
                
-               tabPanel("Data Processing"),
+               tabPanel("Data Processing",
+                        layout_columns(
+                          
+                          # Left column (pipeline builder)
+                          card(
+                            card_header("Processing Pipeline"),                           
+                            
+                            # Dynamic step panels
+                            uiOutput("processing_steps_ui"),
+                            
+                            # Add first step button
+                            actionButton(
+                              "add_processing_step",
+                              "＋ Add Step",
+                              class = "btn btn-primary btn-sm w-100"
+                            )
+                          ),
+                          
+                          # Right hand side summary panel
+                          card(
+                            card_header("Pipeline Summary"),
+                            uiOutput("pipeline_summary_ui"),
+                            hr(),
+                            textInput(
+                              "pipeline_name",
+                              "Pipeline Name"
+                            ),
+                            actionButton(
+                              "process_data_btn",
+                              "▶ Process Data",
+                              class = "btn btn-success"
+                            ),
+                            
+                            actionButton(
+                              "reset_pipeline_btn",
+                              "Reset Pipeline",
+                              class = "btn btn-danger btn-sm"
+                            )
+                          ),
+                          
+                          # Saved processed datasets summary
+                          card(
+                            card_header("Processed Datasets"),
+                            uiOutput("processed_datasets_list")
+                          )
+                        )
+               ),
                
                
                tabPanel("GLM Net Model")
