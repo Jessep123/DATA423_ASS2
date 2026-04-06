@@ -334,7 +334,7 @@ shinyUI(
     
     navbarMenu("Data Processing",
                tabPanel("Introduction"), #Fill this out with info explaining processing module
-               tabPanel("Missing Values",
+               tabPanel("Data Processing EDA",
                         value = "missing_tab",
                         layout_sidebar(
                           sidebar = sidebar(
@@ -666,7 +666,7 @@ shinyUI(
                                         ),
                                         pickerInput(inputId = "missing_imputate_method",
                                                     label = "Select Imputation Method",
-                                                    choices = c("Manual", "KNN", "Median","Mean"),
+                                                    choices = c("Manual", "KNN", "Median","Mean", "Bagged Trees"),
                                                     selected = NULL,
                                                     multiple = FALSE),
                                         conditionalPanel(
@@ -684,6 +684,14 @@ shinyUI(
                                               "Number of k Nearest Neighbours",
                                               value = 5
                                             )
+                                        ),
+                                        conditionalPanel(
+                                          condition = "input.missing_imputate_method == 'Bagged Trees'",
+                                          numericInput(
+                                            "bag_trees",
+                                            "Number of Trees",
+                                            value = 25
+                                          )
                                         ),
                                         actionButton("impute_missing_values", "Apply"),
                                         actionButton("reset_missing_imputes", "Remove All Imputes")
@@ -822,87 +830,142 @@ shinyUI(
                                        
                           ),
                                 
-                          tabPanel("Outlier Patterns",
+
+                          tabPanel("Univariate Outliers",
+                                   plotOutput("outlier_scatter"),
+                                   
+                                   accordion(open = FALSE,
+                                             accordion_panel("Chart Controls",
+                                                             chart_console(
+                                                               fluidRow(
+                                                                 pickerInput(
+                                                                 inputId = "outlier_scatter_var",
+                                                                 label = "Select Numeric Variable",
+                                                                 choices = names(non_cat_vars),
+                                                                 selected = "DEATH_RATE",
+                                                                 multiple = FALSE,
+                                                                 options = list(
+                                                                   `actions-box` = TRUE,
+                                                                   `live-search` = TRUE
+                                                                 )
+                                                               ),
+                                                               pickerInput(
+                                                                 inputId = "outlier_scatter_method",
+                                                                 label = "Outlier Criteria",
+                                                                 choices = c("Standard Deviation", "Inter-Quartile Range"),
+                                                                 selected = "Inter-Quartile Range",
+                                                                 multiple = FALSE,
+                                                                 options = list(
+                                                                   `actions-box` = TRUE,
+                                                                   `live-search` = TRUE
+                                                                 )
+                                                               ),
+                                                               conditionalPanel(
+                                                                 condition = "input.outlier_scatter_method == 'Inter-Quartile Range'",
+                                                                 numericInput(
+                                                                   "outlier_scatter_iqr_range",
+                                                                   "Inter-Quartile Range Multiplier",
+                                                                   value = 1.5
+                                                                 )
+                                                               ),
+                                                               conditionalPanel(
+                                                                 condition = "input.outlier_scatter_method == 'Standard Deviation'",
+                                                                 numericInput(
+                                                                   "outlier_scatter_sd_num",
+                                                                   "Standard Deviations From Mean",
+                                                                   value = 3
+                                                                 )
+                                                               ),
+                                                               checkboxInput(
+                                                                 inputId = "outlier_scatter_mark",
+                                                                 label = "Highlight Outlier",
+                                                                 value = FALSE
+                                                               )
+                                                             ))
+                                                             ))),
+                          tabPanel("Bivariate Outliers"),
+                          
+                          tabPanel("Multivariate Outliers",
                                    plotOutput("outlier_pattern"),
                                    
                                    accordion(open = FALSE,
                                              accordion_panel("Chart Controls",
-                                             chart_console(
-                                               pickerInput(
-                                                 inputId = "outlier_distance_method_plot",
-                                                 label = "Select Distance Method",
-                                                 choices = c("Mahalanobis", "Local Outlier Factors", "Isolation Forest"),
-                                                 selected = "Isolation Forest",
-                                                 multiple = FALSE,
-                                                 options = list(
-                                                   `actions-box` = TRUE,
-                                                   `live-search` = TRUE
-                                                 )
-                                               ),
-                                               
-                                               
-                                               
-                                               # Conditional panels below
-                                               conditionalPanel(
-                                                 condition = "input.outlier_distance_method_plot == 'Mahalanobis'",
-                                                 pickerInput(
-                                                   inputId = "selected_var_mahal",
-                                                   label = "Select Variable",
-                                                   choices = NULL,
-                                                   selected = NULL,
-                                                   multiple = TRUE,
-                                                   options = list(
-                                                     `actions-box` = TRUE,
-                                                     `live-search` = TRUE
-                                                   )
-                                                 ),
-                                                 sliderInput("mahal_threshold", 
-                                                             "Chi-Squared Quantile Threshold",
-                                                             min = 0.90, max = 0.999, value = 0.975, step = 0.001),
-                                                 checkboxInput("maha_robust",
-                                                               "Make it Robust",
-                                                               value = FALSE)
-                                               ),
-                                               
-                                               conditionalPanel(
-                                                 condition = "input.outlier_distance_method_plot == 'Local Outlier Factors'",
-                                                 numericInput(
-                                                   inputId = "lof_min_points",
-                                                   label = "Minimum Points",
-                                                   value = 4, 
-                                                   min = 1, 
-                                                   max = 10
-                                                 ),
-                                                 numericInput(
-                                                   "lof_threshold",
-                                                   "Outlier Threshold",
-                                                   value = 2, 
-                                                   min = 1, 
-                                                   max = 10 
-                                                 )
-                                               ),
-                                               conditionalPanel(
-                                                 condition = "input.outlier_distance_method_plot == 'Isolation Forest'",
-                                                 numericInput(
-                                                   "iso_for_threshold",
-                                                   "Threshold",
-                                                   value = 0.45, 
-                                                   min = 0, 
-                                                   max = 1 
-                                                 )
-                                               ),
-                                               div(
-                                                 style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
-                                                 actionButton(
-                                                   "reset_plot_input_outlier_pattern",
-                                                   "Reset Plot Adjustments"
-                                                 )
-                                               )
-                                             )
-
-                                             
-                                   ))
-                          ),     
+                                                             chart_console(
+                                                               pickerInput(
+                                                                 inputId = "outlier_distance_method_plot",
+                                                                 label = "Select Distance Method",
+                                                                 choices = c("Mahalanobis", "Local Outlier Factors", "Isolation Forest"),
+                                                                 selected = "Isolation Forest",
+                                                                 multiple = FALSE,
+                                                                 options = list(
+                                                                   `actions-box` = TRUE,
+                                                                   `live-search` = TRUE
+                                                                 )
+                                                               ),
+                                                               
+                                                               
+                                                               
+                                                               # Conditional panels below
+                                                               conditionalPanel(
+                                                                 condition = "input.outlier_distance_method_plot == 'Mahalanobis'",
+                                                                 pickerInput(
+                                                                   inputId = "selected_var_mahal",
+                                                                   label = "Select Variable",
+                                                                   choices = NULL,
+                                                                   selected = NULL,
+                                                                   multiple = TRUE,
+                                                                   options = list(
+                                                                     `actions-box` = TRUE,
+                                                                     `live-search` = TRUE
+                                                                   )
+                                                                 ),
+                                                                 sliderInput("mahal_threshold", 
+                                                                             "Chi-Squared Quantile Threshold",
+                                                                             min = 0.90, max = 0.999, value = 0.975, step = 0.001),
+                                                                 checkboxInput("maha_robust",
+                                                                               "Make it Robust",
+                                                                               value = FALSE)
+                                                               ),
+                                                               
+                                                               conditionalPanel(
+                                                                 condition = "input.outlier_distance_method_plot == 'Local Outlier Factors'",
+                                                                 numericInput(
+                                                                   inputId = "lof_min_points",
+                                                                   label = "Minimum Points",
+                                                                   value = 4, 
+                                                                   min = 1, 
+                                                                   max = 10
+                                                                 ),
+                                                                 numericInput(
+                                                                   "lof_threshold",
+                                                                   "Outlier Threshold",
+                                                                   value = 2, 
+                                                                   min = 1, 
+                                                                   max = 10 
+                                                                 )
+                                                               ),
+                                                               conditionalPanel(
+                                                                 condition = "input.outlier_distance_method_plot == 'Isolation Forest'",
+                                                                 numericInput(
+                                                                   "iso_for_threshold",
+                                                                   "Threshold",
+                                                                   value = 0.45, 
+                                                                   min = 0, 
+                                                                   max = 1 
+                                                                 )
+                                                               ),
+                                                               div(
+                                                                 style = "display: flex;justify-content: flex-end;align-items: center;height: 100%;",
+                                                                 actionButton(
+                                                                   "reset_plot_input_outlier_pattern",
+                                                                   "Reset Plot Adjustments"
+                                                                 )
+                                                               )
+                                                             )
+                                                             
+                                                             
+                                             ))
+                          ),    
                                    
                           
                           tabPanel("Data Table Export",
@@ -982,7 +1045,258 @@ shinyUI(
                ),
                
                
-               tabPanel("GLM Net Model")
+               tabPanel("GLM Net Model",
+                        layout_sidebar(
+                          sidebar = sidebar(
+                            title = "Pipeline",
+                            width = "350px",
+                            open = "open",
+                            
+                            pickerInput(
+                              inputId  = "selected_pipeline_model",
+                              label    = "Select Preprocessed Pipeline",
+                              choices  = NULL,
+                              selected = NULL,
+                              multiple = FALSE,
+                              options  = list(`live-search` = TRUE)
+                            ),
+                            
+                            hr(),
+                            
+                            h6("Pipeline Summary", style = "font-weight: bold;"),
+                            uiOutput("selected_pipeline_summary"),
+                            
+                            hr(),
+                            
+                            div(
+                              style = "background-color: #f8f9fa; padding: 10px; border-radius: 5px;",
+                              p(strong("Outcome Variable: "), "DEATH_RATE"),
+                              uiOutput("model_data_summary")  # shows rows/cols of selected pipeline
+                            )
+                            
+                          ),  #sidebar end bracket
+                          
+                          tabsetPanel(
+                            
+                            tabPanel("Model Summary",
+                                     plotOutput("model_predictions")),
+                            
+                            tabPanel("Variable Importance",
+                                     plotlyOutput("varimp_plot")),
+                            
+                            tabPanel("Residuals",
+                                     plotOutput("model_diagnostic_plot")),
+                            
+                            tabPanel("Residuals - Outliers",
+                                     conditionalPanel(
+                                       condition = "input.outlier_display_mode == 'Standard Deviation'",
+                                     plotOutput("model_outlier_plot")),
+                                     conditionalPanel(
+                                       condition = "input.outlier_display_mode == 'Inter-Quartile Range'",
+                                       plotOutput("outlier_density_box_plot")),
+                                     accordion( open = TRUE,
+                                                accordion_panel( "Plot Options",
+                                                  chart_console(
+                                                    fluidRow(
+                                                      column(
+                                                        width = 4,
+                                                        radioButtons(
+                                                          "outlier_display_mode",
+                                                          "Outlier Threshold Type",
+                                                          choices = c("Standard Deviation", "Inter-Quartile Range"),
+                                                          selected = "Standard Deviation",
+                                                          inline = TRUE
+                                                        )
+                                                      ),
+                                                      
+                                                      column(
+                                                        width = 8,
+                                                        
+                                                        conditionalPanel(
+                                                          condition = "input.outlier_display_mode == 'Standard Deviation'",
+                                                          fluidRow(
+                                                            column(
+                                                              width = 8,
+                                                              sliderInput(
+                                                                "model_outlier_sd_threshold",
+                                                                "Residual SD Threshold",
+                                                                min = 1,
+                                                                max = 5,
+                                                                value = 2,
+                                                                step = 0.5
+                                                              )
+                                                            ),
+                                                            column(
+                                                              width = 4,
+                                                              div(
+                                                                style = "padding-top: 30px;",
+                                                                checkboxInput("model_outlier_label", "Label Outliers", TRUE)
+                                                              )
+                                                            )
+                                                          )
+                                                        ),
+                                                        
+                                                        conditionalPanel(
+                                                          condition = "input.outlier_display_mode == 'Inter-Quartile Range'",
+                                                          fluidRow(
+                                                            column(
+                                                              width = 4,
+                                                              sliderInput(
+                                                                "plot_iqr_mult",
+                                                                "IQR Multiplier",
+                                                                min = 0,
+                                                                max = 5,
+                                                                value = 1.5,
+                                                                step = 0.5
+                                                              )
+                                                            ),
+                                                            column(
+                                                              width = 3,
+                                                              div(
+                                                                style = "padding-top: 30px;",
+                                                                checkboxInput("outlier_boxplot_label", "Label Outliers", TRUE)
+                                                              )
+                                                            ),
+                                                            column(
+                                                              width = 5,
+                                                              pickerInput(
+                                                                "model_outlier_colourby",
+                                                                "Colour By",
+                                                                choices = c("None", "Outlier", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                                selected = "Outlier"
+                                                              )
+                                                            )
+                                                          )
+                                                        )
+                                                      )
+                                                    )
+                                     )))
+                                     ),
+                            
+                            #Old tab panel for IQR plot, there if I need it
+                            # tabPanel("Outliers - IQR",
+                            #          # plotOutput("outlier_density_box_plot"),
+                            #          accordion( open = FALSE,
+                            #                     accordion_panel( "Plot Options",
+                            #                                      chart_console(
+                            #                                        fluidRow(
+                            #                                          sliderInput("plot_iqr_mult", 
+                            #                                                      "IQR Multiplier", 
+                            #                                                      min = 0, 
+                            #                                                      max = 5,
+                            #                                                      value = 1.5, 
+                            #                                                      step = 0.5),
+                            #                                          checkboxInput("outlier_boxplot_label", "Label Outliers", TRUE),
+                            #                                          pickerInput("model_outlier_colourby", 
+                            #                                                      "Colour By", 
+                            #                                                      choices = c("None", "Outlier", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                            #                                                      selected = "Outlier")
+                            #                                        )
+                            #                                      )))
+                            #          ),
+                            
+                            
+                            
+
+                            tabPanel("Cooks Distance"),
+                            
+                            tabPanel("Mahalanobis"),
+                            
+                          ),#tabset panel end bracket
+                          
+                          chart_console(
+                              
+                            
+                            h6("Model Hyperparameters", style = "font-weight: bold; margin-bottom: 10px;"),
+                            
+                          fluidRow(
+                            
+                            # GLM family
+                            column(2,
+                                   selectInput(
+                                     "glm_family",
+                                     "Model Family",
+                                     choices = c(
+                                       "Gaussian"  = "gaussian",
+                                       "Poisson"   = "poisson"
+                                     ),
+                                     selected = "gaussian"
+                                   )
+                            ),
+                            
+
+                            # Alpha - elastic net mixing - Hashed out for now as alpha calculated with grid search
+                            # column(2,
+                            #        sliderInput(
+                            #   "glmnet_alpha",
+                            #   "Alpha (0=Ridge, 1=Lasso)",
+                            #   min   = 0,
+                            #   max   = 1,
+                            #   value = 0.5,
+                            #   step  = 0.1
+                            # )
+                            # ),
+                            
+                            # Lambda tuning
+                            column(2,
+                                   sliderInput(
+                                     "glmnet_tune_length",
+                                     "Lambda Tune Length",
+                                     min   = 5,
+                                     max   = 50,
+                                     value = 10,
+                                     step  = 5
+                                   )
+                            ),
+                            # Cross validation folds
+                            column(2,
+                                   sliderInput(
+                                     "cv_folds",
+                                     "CV Folds",
+                                     min   = 3,
+                                     max   = 10,
+                                     value = 5,
+                                     step  = 1
+                                   )
+                            ),
+                            
+                            # CV repeats
+                            column(2,
+                                   sliderInput(
+                                     "cv_repeats",
+                                     "CV Repeats",
+                                     min   = 1,
+                                     max   = 5,
+                                     value = 1,
+                                     step  = 1
+                                   )
+                            ),
+                            
+                            # Run button
+                            column(2,
+                                   div(
+                                     style = "display: flex; align-items: flex-end; height: 100%",
+                                     # actionButton(
+                                     #   "run_model_btn",
+                                     #   "▶ Run Model",
+                                     #   class = "btn btn-success btn-block w-100"
+                                     # )
+                                     tableOutput("model_results")
+                                   )
+                            )
+                          )
+                          ),#Hyperparameter Panel End bracket
+                          
+                          uiOutput("model_equation")
+                          
+                        # div(
+                        #   style = "width:50%",
+                        #   tableOutput("model_results")
+                        #   )
+                          
+                        )#LAYOUT_SIDEBAR END BRACKET
+                        
+                        ) #GLM NET MODEL TAB END BRACKET
                
     ),
 

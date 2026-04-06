@@ -75,7 +75,7 @@ shinyServer(function(input, output, session) {
       
       reactive({
         
-        df <- data
+        df <- train_data
         
         # Input ID's
         cat_id <- paste0("selected_vars_categorical_", label)
@@ -240,6 +240,7 @@ shinyServer(function(input, output, session) {
             for (col in cols) {
               df[[col]][is.na(df[[col]])] <- imputation[[3]]
             }
+            
           }
           if (method == "Median") {
             processing_recipe <- processing_recipe %>% step_impute_median(all_of(cols))
@@ -249,8 +250,13 @@ shinyServer(function(input, output, session) {
           }
           if (method == "KNN") {
               
-              knn_neighbours <- input$knn_neighbours
+              knn_neighbours <- imputation[[4]]
               processing_recipe <- processing_recipe %>% step_impute_knn(all_of(cols), neighbors = knn_neighbours)
+            
+          }
+          if (method == "Bagged Trees") {
+            
+            processing_recipe <- processing_recipe %>% step_impute_bag(all_of(cols), trees = input$bag_trees)
             
           }
         }
@@ -1702,13 +1708,13 @@ shinyServer(function(input, output, session) {
             angle = 70,
             hjust = 0,
             vjust = 0,
-            margin = margin(t = 10)),
+            margin = ggplot2::margin(t = 10)),
           plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
-          plot.margin = margin(t = 50, r = 120),
+          plot.margin = ggplot2::margin(t = 50, r = 120),
           plot.caption = element_text(
             size = 11,
             hjust = 0,   
-            margin = margin(t = 10)
+            margin = ggplot2::margin(t = 10)
           ),
           legend.position = legend_position) 
       
@@ -2308,6 +2314,7 @@ shinyServer(function(input, output, session) {
             by = "Variable"
           )
         
+        
         outliers <- df_long %>%
           left_join(df_stats, by = "Variable") %>%
           filter(Value < lower_fence | Value > upper_fence)
@@ -2357,6 +2364,75 @@ shinyServer(function(input, output, session) {
         choices = numeric_choices,
         selected = numeric_choices
       )
+      
+    })
+    
+    output$outlier_scatter <- renderPlot({
+      df <- processed_eda_reactive()
+      var <- input$outlier_scatter_var
+      outlier_method <- input$outlier_scatter_method
+      mark_outlier_flag <- input$outlier_scatter_mark
+      
+      df$id <- seq_len(nrow(df))
+      
+      
+      if (mark_outlier_flag){
+        
+        selected_col <- df[[var]]
+        
+        if (outlier_method == "Inter-Quartile Range"){
+          #Calculating IQR for selected col
+          q1 <- quantile(selected_col, 0.25, na.rm = TRUE)
+          q3 <- quantile(selected_col, 0.75, na.rm = TRUE)
+          iqr <- IQR(selected_col, na.rm = TRUE)
+          
+          iqr_multiplier <- input$outlier_scatter_iqr_range
+          
+          lower_bound <- q1 - iqr_multiplier * iqr
+          upper_bound <- q3 + iqr_multiplier * iqr
+          
+        } else if (outlier_method == "Standard Deviation"){
+          #Calculating standard deviation of col
+          mean_col <- mean(selected_col, na.rm = TRUE)
+          sd_col <- sd(selected_col, na.rm = TRUE)
+          
+          sd_val <- input$outlier_scatter_sd_num
+          
+          lower_bound <- mean_col - sd_val * sd_col
+          upper_bound <- mean_col + sd_val * sd_col
+          
+        }
+        #Applying upper/lower bounds to flag outliers
+        df$outlier_flag <- ifelse(
+          !is.na(selected_col) & (selected_col < lower_bound | selected_col > upper_bound),
+          "outlier",
+          "non-outlier"
+        )
+        
+        df$label <- NA_character_
+        df$label[df$outlier_flag == "outlier"] <- as.character(df$CODE[df$outlier_flag == "outlier"])
+
+      }
+      
+
+      plot <- ggplot(df, aes(x = id,
+                             y = .data[[var]])) +
+        labs(
+          y = var,
+          x = "Complete Observations",
+          title = paste("Scatter Plot of", var)
+        )
+      
+      #If mark outliers is selected then colour by the calculated column and label
+      if (mark_outlier_flag) {
+        plot <- plot + 
+          geom_point(aes(colour = outlier_flag)) +
+          ggrepel::geom_text_repel(max.overlaps = 50, mapping = aes(label = label))
+      } else {
+        plot <- plot + geom_point()
+      }
+      
+      plot
       
     })
     
@@ -2593,6 +2669,10 @@ shinyServer(function(input, output, session) {
     # Reactive list tracking each step
     pipeline_steps <- reactiveVal(list())
     
+    observe({
+      print(pipeline_steps())
+    })
+    
     # Add a new empty step
     observeEvent(input$add_processing_step, {
       current <- pipeline_steps()
@@ -2601,6 +2681,10 @@ shinyServer(function(input, output, session) {
       
       #Selected input method, must be selected
       input_method  = paste0("step_method_", id)
+      
+      #Row removal test skip is NULL
+      #Will be changed if NA_REMOVE_ROW selected
+      test_skip <- NULL
       
       # Validating a method has been selected
       if (input[[input_method]] == "") {
@@ -2616,28 +2700,44 @@ shinyServer(function(input, output, session) {
       
       if (input[[input_method]] == "impute_knn"){
         threshold_input <- paste0("step_knn_k_", id)
-        additional_info <- input[[threshold_input]]
+        additional_info <- isolate(input[[threshold_input]])
       }
       else if (input[[input_method]] == "impute_manual"){
         threshold_input <- paste0("step_manual_val_", id)
-        additional_info <- input[[threshold_input]]
+        additional_info <- isolate(input[[threshold_input]])
+      }
+      else if (input[[input_method]] == "impute_bag"){
+        num_trees <- paste0("step_bag_trees_", id)
+        additional_info <- isolate(input[[num_trees]])
       }
       else if (input[[input_method]] == "remove_na_rows"){
         threshold_input <- paste0("step_na_row_threshold_", id)
-        additional_info <- input[[threshold_input]]
+        additional_info <- isolate(input[[threshold_input]])
+        
+        #Row Removal Apply to test data flag
+        row_remove_apply_to_test <- paste0("step_na_row_apply_test", id)
+        
+        if (input[[row_remove_apply_to_test]]){ #If checkbox is TRUE
+          test_skip <- FALSE #skip = FALSE in processing pipeline so row removal applied to test data
+        } else{test_skip <- TRUE}#skip = TRUE in processing pipeline so rows aren't removed in test and all imputed instead
+        
+        
       }
       else if (input[[input_method]] == "remove_na_cols"){
         threshold_input <- paste0("step_na_col_threshold_", id)
-        additional_info <- input[[threshold_input]]
+        additional_info <- isolate(input[[threshold_input]])
       }
       else {additional_info <- 0}
       
+      
+
 
       new_step <- list(
         id     = id,
-        method = input[[input_method]] ,
-        cols   = input[[input_cols]],
-        additional_info = additional_info
+        method = isolate(input[[input_method]]) ,
+        cols   = isolate(input[[input_cols]]),
+        additional_info = additional_info,
+        skip_test = test_skip
       )
       pipeline_steps(append(current, list(new_step)))
     })
@@ -2681,12 +2781,20 @@ shinyServer(function(input, output, session) {
             "Impute — Mean"            = "impute_mean",
             "Impute — KNN"             = "impute_knn",
             "Impute — Manual Value"    = "impute_manual",
+            "Impute — Bagged Trees"    = "impute_bag",
             "Transform — Box-Cox"      = "boxcox",
             "Transform — Yeo-Johnson"  = "yeojohnson",
             "Scale Data"      = "scale",
             "Center Data"      = "center",
             "Remove Near-Zero Variance"= "nzv",
-            "Remove Linear Combos"     = "lincomb"
+            "Remove Linear Combos"     = "lincomb",
+            "Remove Specific Observations"     = "remove_obs",
+            "Remove Multivariate Outliers"     = "remove_outliers",
+            "Replace Outliers"     = "replace_outliers",
+            "Winsorize Outliers"     = "winsorize",
+            "Add Interaction Term"     = "interaction_term"
+            
+            
           ),
           selected = ""
         ),
@@ -2698,9 +2806,14 @@ shinyServer(function(input, output, session) {
             "input['step_method_", step_id, "'] == 'impute_mean'   || ",
             "input['step_method_", step_id, "'] == 'impute_knn'    || ",
             "input['step_method_", step_id, "'] == 'impute_manual' || ",
+            "input['step_method_", step_id, "'] == 'impute_bag'    || ",
             "input['step_method_", step_id, "'] == 'boxcox'        || ",
             "input['step_method_", step_id, "'] == 'yeojohnson'    || ",
-            "input['step_method_", step_id, "'] == 'scale'"
+            "input['step_method_", step_id, "'] == 'scale'         ||",
+            "input['step_method_", step_id, "'] == 'winsorize'     ||",
+            "input['step_method_", step_id, "'] == 'interaction_term'     ||",
+            "input['step_method_", step_id, "'] == 'replace_outliers'"
+            
           ),
           pickerInput(
             inputId  = paste0("step_cols_", step_id),
@@ -2719,6 +2832,16 @@ shinyServer(function(input, output, session) {
             paste0("step_knn_k_", step_id),
             "Number of Neighbours",
             value = 5, min = 1
+          )
+        ),
+        
+        # Bagged Tree
+        conditionalPanel(
+          condition = paste0("input['step_method_", step_id, "'] == 'impute_bag'"),
+          numericInput(
+            paste0("step_bag_trees_", step_id),
+            "Number of Trees",
+            value = 25
           )
         ),
         
@@ -2749,9 +2872,51 @@ shinyServer(function(input, output, session) {
             paste0("step_na_row_threshold_", step_id),
             "Remove rows with more than X missing values",
             min = 0, max = ncol(df), value = 0, step = 1
+          ),
+          checkboxInput(
+            paste0("step_na_row_apply_test", step_id),
+            "Apply Row Removal to Test Data",
+            value = TRUE
           )
-        )
-      
+        ),
+        # Just a note if lincomb is selected  
+        conditionalPanel(
+          condition = paste0("input['step_method_", step_id, "'] == 'lincomb'"),
+          p("NOTE - Make sure all NA values have been addressed before adding this step", style = "color:red;")
+        ),
+        
+        #Remove observations panel
+        conditionalPanel(
+          condition = paste0("input['step_method_", step_id, "'] == 'remove_obs'"),
+          pickerInput(
+            inputId  = paste0("step_", step_id, "obs_remove_train"),
+            label    = "Observations to Remove - Training Data",
+            choices  = unique(train_data$CODE),  
+            selected = NULL,
+            multiple = TRUE,
+            options  = list(`actions-box` = TRUE, `live-search` = TRUE)
+          ),
+          pickerInput(
+            inputId  = paste0("step_", step_id, "obs_remove_test"),
+            label    = "Observations to Remove - Test Data",
+            choices  = unique(train_data$CODE),  
+            selected = NULL,
+            multiple = TRUE,
+            options  = list(`actions-box` = TRUE, `live-search` = TRUE)
+          )
+        ),
+        #Remove Outliers panel
+        conditionalPanel(
+          condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers'"),
+          pickerInput(
+            inputId  = paste0("step_", step_id, "remove_outliers"),
+            label    = "Method",
+            choices  = c("Mahalanobis Distance", "Isolation Forest", "Local Outlier Factors"),  
+            selected = NULL,
+            multiple = FALSE,
+            options  = list(`actions-box` = TRUE, `live-search` = TRUE)
+          )
+        ),
       )
       # })) #taglist end brackets
 })
@@ -2782,7 +2947,8 @@ shinyServer(function(input, output, session) {
           #Contextual info to be displayed
           if (method == "remove_na_rows"){
             row_threshold <- step$additional_info
-            contextual_info <- paste("| Threshold =", row_threshold)
+            skip_test <- step$skip_test
+            contextual_info <- paste("| Threshold =", row_threshold, "| Skip Test =", skip_test)
           }
           else  if (method == "remove_na_cols"){
               col_threshold <- step$additional_info
@@ -2795,6 +2961,10 @@ shinyServer(function(input, output, session) {
           else  if (method == "impute_manual"){
             manual_val <- step$additional_info
             contextual_info <- paste0("| Value = ", manual_val)
+          } 
+          else  if (method == "impute_bag"){
+            trees <- step$additional_info
+            contextual_info <- paste0("| Trees = ", trees)
           } 
           else{contextual_info <- NULL}
           
@@ -2824,18 +2994,31 @@ shinyServer(function(input, output, session) {
     })
     
     
-    #Reactive list of all saved pipelines
-    saved_pipelines <- reactiveVal(list())
+    
+    # Reactive object for saving pipelines
+    #Already has default pipeline defined
+    saved_pipelines <- reactiveVal(list(
+      "Default Pipeline" = list(
+        recipe  = default_recipe,
+        df      = juice(default_prepped),
+        steps   = default_steps,
+        created = Sys.time()
+      )
+    ))
     
     pipeline_recipe <- eventReactive(input$process_data_btn, {
       steps <- pipeline_steps()
-      df <- data
+      
+      #Using training data for pipeline
+      df <- train_data
       
 
       #Initial pipeline recipe using modified dataframe
       pipeline_recipe <- recipe(DEATH_RATE ~ ., data = df) %>% 
         update_role("CODE", new_role = "id") %>% 
-        update_role("OBS_TYPE", new_role = "split")
+        update_role("OBS_TYPE", new_role = "split") %>%
+        step_unknown() %>% #Assigning missing factors to unknown
+        step_dummy(all_nominal_predictors(), one_hot = TRUE) #Encoding categorical variables
       
       
       # Track removed cols as loop progresses
@@ -2851,52 +3034,63 @@ shinyServer(function(input, output, session) {
         
         cols <- intersect(names(df), setdiff(step$cols, removed_cols))
         
-        # Skip steps that need cols if all have already been used
-        needs_cols <- method %in% c("impute_median", "impute_mean", "impute_knn",
-                                    "impute_manual", "boxcox", "yeojohnson", 
-                                    "scale", "center")
-        if (needs_cols && length(cols) == 0) {
-          showNotification(
-            paste0("Step ", i, " (", method, ") skipped — all selected columns have been removed"),
-            type = "warning"
-          )
-          next
-        }
+        print(paste("STEP", i))
+        print(method)
+        print(cols)
+        print(step$additional_info)
+        
+        needs_cols <- method %in% c(
+          "impute_median", "impute_mean", "impute_knn", "impute_bag",
+          "impute_manual", "boxcox", "yeojohnson",
+          "scale", "center"
+        )
+        
+        # # Skip steps that need cols if all have already been used
+        # needs_cols <- method %in% c("impute_median", "impute_mean", "impute_knn",
+        #                             "impute_manual", "boxcox", "yeojohnson", 
+        #                             "scale", "center")
+        # if (needs_cols && length(cols) == 0) {
+        #   showNotification(
+        #     paste0("Step ", i, " (", method, ") skipped — all selected columns have been removed"),
+        #     type = "warning"
+        #   )
+        #   next
+        # }
         
         #Removing rows/cols from data based on thresholds
         if (method == "remove_na_rows") {
           threshold <- step$additional_info
           
-          # Calculate which rows to remove based on full dataset once
-          active_cols  <- setdiff(names(df), c(imputed_cols, removed_cols))
-          rows_to_keep <- which(rowSums(is.na(df[, active_cols, drop = FALSE])) <= threshold)
-          
           pipeline_recipe <- pipeline_recipe %>%
-            step_filter(row_number() %in% !!rows_to_keep)
-        
+            step_mutate(
+              .row_na_count = rowSums(is.na(across(everything())))
+            ) %>%
+            step_filter(.row_na_count <= !!threshold, skip = step$skip_test) %>%
+            step_rm(.row_na_count)
           
+
         } else if (method == "remove_na_cols") {
           threshold <- step$additional_info
           active_cols  <- setdiff(names(df), c(imputed_cols, removed_cols))
           
           # Calculate which cols to remove based on FULL dataset once
-          # This way the same columns are always removed regardless of fold
           cols_to_remove <- active_cols[
             colMeans(is.na(df[, active_cols, drop = FALSE])) * 100 > threshold
           ]
-          
-          if (length(cols_to_remove) > 0) {
-            pipeline_recipe <- pipeline_recipe %>% step_rm(all_of(cols_to_remove))
-          }
+
+          pipeline_recipe <- pipeline_recipe %>%  step_filter_missing(all_predictors(), threshold = threshold / 100)
           
           # Update removed column tracker
           removed_cols <- c(removed_cols, cols_to_remove)
           
         } else if (method == "impute_manual") {
           val  <- step$additional_info
+          
+          for (col in cols) {
+            pipeline_recipe <- pipeline_recipe %>%
+              step_mutate(!!col := ifelse(is.na(.data[[col]]), val, .data[[col]]))
+          }
 
-          pipeline_recipe <- pipeline_recipe %>%
-            step_mutate_at(all_of(cols), fn = ~ ifelse(is.na(.x), !!val, .x))
           imputed_cols <- c(imputed_cols, cols)
           
         } else if (method == "impute_median") {
@@ -2910,6 +3104,11 @@ shinyServer(function(input, output, session) {
         } else if (method == "impute_knn") {
           k <- step$additional_info
           pipeline_recipe <- pipeline_recipe %>% step_impute_knn(all_of(cols), neighbors = k)
+          imputed_cols <- c(imputed_cols, cols)
+        } else if (method == "impute_bag") {
+          
+          tree <- step$additional_info
+          pipeline_recipe <- pipeline_recipe %>% step_impute_bag(all_of(cols), trees = tree)
           imputed_cols <- c(imputed_cols, cols)
           
         } else if (method == "boxcox") {
@@ -2934,11 +3133,12 @@ shinyServer(function(input, output, session) {
       
       # Prep and bake the recipe on the modified dataframe
       prepped_recipe <- prep(pipeline_recipe, training = df)
-      baked_df <- bake(prepped_recipe, new_data = df)
+
+
       
       #Returning list with transformed df and recipe
       list(
-        df  = baked_df,
+        df  = juice(prepped_recipe),
         recipe = pipeline_recipe
       )
       
@@ -2951,8 +3151,7 @@ shinyServer(function(input, output, session) {
       result <- pipeline_recipe()
       req(result)
       
-      # browser()
-      
+
       #Validating steps have been selected
       # if (length(steps) == 0) {
       #   showNotification(
@@ -3040,9 +3239,28 @@ shinyServer(function(input, output, session) {
                 method
               }
               
+              #Contextual info to be displayed
+              if (method == "remove_na_rows"){
+                row_threshold <- step$additional_info
+                skip_test <- step$skip_test
+                contextual_info <- paste("| Threshold =", row_threshold, "| Skip Test =", skip_test)
+              }
+              else  if (method == "remove_na_cols"){
+                col_threshold <- step$additional_info
+                contextual_info <- paste0("| Threshold = ", col_threshold, "%")
+              } 
+              else  if (method == "impute_knn"){
+                neighbours <- step$additional_info
+                contextual_info <- paste0(" | Neighbours = ", neighbours)
+              } 
+              else  if (method == "impute_manual"){
+                manual_val <- step$additional_info
+                contextual_info <- paste0("| Value = ", manual_val)
+              } 
+              else{contextual_info <- NULL}
 
               tags$li(
-                paste0(method_label)
+                paste0(method_label, contextual_info)
               )
             })
           )}
@@ -3094,6 +3312,456 @@ shinyServer(function(input, output, session) {
     
 
 # =============================================================================== 
+    #       GLM MODEL SECTION
+# ====================================================================================
+    #This section is related to making/running/evaluating the GLM model
+    
+    #Change selected_pipeline_model options to be whatever pipelines are saved
+    observe({
+      pipelines <- saved_pipelines()
+      
+      updatePickerInput(
+        session,
+        inputId  = "selected_pipeline_model",
+        choices  = names(pipelines),
+        selected = names(pipelines)[length(pipelines)]  # default to most recent
+      )
+    })
+    
+    #Reactive object for the selected pipeline
+    selected_pipeline <- reactive({
+      req(input$selected_pipeline_model)
+      pipelines <- saved_pipelines()
+      req(length(pipelines) > 0)
+      pipelines[[input$selected_pipeline_model]]
+    })
+    
+    #UI for selected pipeline summary
+    output$selected_pipeline_summary <- renderUI({
+      req(input$selected_pipeline_model)
+      pipelines <- saved_pipelines()
+      
+      if (length(pipelines) == 0){
+        return(p("No pipelines made yet :(", style = "color: grey;"))
+      }
+
+      pipeline <- pipelines[[input$selected_pipeline_model]]
+      steps    <- pipeline$steps
+      
+      if (length(steps) == 0){
+        return(p("No steps in this pipeline, just base data", style = "color: grey;"))
+      }
+      
+      tags$ol(
+        style = "padding-left: 15px; font-size: 0.9em;",
+        lapply(seq_along(steps), function(j) {
+          step   <- steps[[j]]
+          method <- step$method
+          
+          contextual <- switch(method,
+                               "remove_na_rows" = paste("| Threshold =", step$additional_info),
+                               "remove_na_cols" = paste0("| ", step$additional_info, "% missing"),
+                               "impute_knn"     = paste0("| k = ", step$additional_info),
+                               "impute_manual"  = paste0("| Value = ", step$additional_info),
+                               ""
+          )
+          
+          tags$li(paste(methods[[method]], contextual))
+        })
+      )
+      
+    })
+    
+    # Data summary for selected pipeline
+    output$model_data_summary <- renderUI({
+      req(input$selected_pipeline_model)
+      pipelines <- saved_pipelines()
+      req(length(pipelines) > 0)
+      
+      pipeline <- pipelines[[input$selected_pipeline_model]]
+      
+      tagList(
+        p(strong("Rows: "),   nrow(pipeline$df),
+          strong(" | Cols: "), ncol(pipeline$df)),
+        p(strong("Created: "), format(pipeline$created, "%d %b %Y %H:%M"))
+      )
+    })
+    
+    # Saving model result
+    model_result <- reactiveVal(NULL)
+    
+    reactive_model <-  reactive({
+      pipeline <- selected_pipeline()
+      req(pipeline)
+      
+      #Extracting pipeline recipe for model
+      pipeline_recipe  <- pipeline$recipe  
+      
+      #Final step removing any observations with NA values so none make it to GLM
+      pipeline_recipe <- pipeline_recipe %>%
+        step_naomit(all_predictors(), all_outcomes(), skip = FALSE)
+      
+      prepped <- prep(pipeline_recipe, training = train_data)
+      
+      train_processed <- juice(prepped)
+      test_processed  <- bake(prepped, new_data = test_data)
+      
+      
+      ctrl <- trainControl(
+        method          = "cv",
+        number          = input$cv_folds,
+        savePredictions = "final",
+        verboseIter     = FALSE
+      )
+      
+      # Optional log transform on outcome
+      # if (input$log_transform_outcome) {
+      #   pipeline_recipe <- pipeline_recipe %>% step_log(all_outcomes(), base = 10)
+      # }
+      
+      model <- caret::train(
+        DEATH_RATE ~ . - CODE - OBS_TYPE,
+        data      = train_processed,     
+        method    = "glmnet",
+        trControl = ctrl,
+        tuneLength = input$glmnet_tune_length,
+        tuneGrid  = expand.grid(
+          alpha  = seq(0, 1, by = 0.1),
+          lambda = 10^seq(-4, 1, length.out = input$glmnet_tune_length)
+        )
+      )
+      
+      test_preds <- predict(model, newdata = test_processed)
+      test_performance <- postResample(pred = test_preds, obs = test_processed$DEATH_RATE)
+      
+      
+      list(
+        model = model,
+        performance = test_performance,
+        test_preds = test_preds,
+        test_actual = test_processed$DEATH_RATE,
+        train_processed = train_processed,
+        test_processed = test_processed
+      )
+    })
+    
+    # #Running model
+    # observeEvent(input$run_model_btn, {
+    #   pipeline <- selected_pipeline()
+    #   req(pipeline)
+    #   
+    #   #Extracting pipeline recipe for model
+    #   pipeline_recipe  <- pipeline$recipe  
+    #   
+    #   #Final step removing any observations with NA values so none make it to GLM
+    #   pipeline_recipe <- pipeline_recipe %>%
+    #     step_naomit(all_predictors(), all_outcomes(), skip = FALSE)
+    #   
+    #   prepped <- prep(pipeline_recipe, training = train_data)
+    #   
+    #   train_processed <- juice(prepped)
+    #   test_processed  <- bake(prepped, new_data = test_data)
+    #   
+    #   
+    #   
+    # 
+    #   ctrl <- trainControl(
+    #     method          = "cv",
+    #     number          = input$cv_folds,
+    #     savePredictions = "final",
+    #     verboseIter     = FALSE
+    #   )
+    #   
+    #   # Optional log transform on outcome
+    #   # if (input$log_transform_outcome) {
+    #   #   pipeline_recipe <- pipeline_recipe %>% step_log(all_outcomes(), base = 10)
+    #   # }
+    #   
+    #   model <- caret::train(
+    #     DEATH_RATE ~ .,
+    #     data      = train_processed,     
+    #     method    = "glmnet",
+    #     trControl = ctrl,
+    #     tuneLength = input$glmnet_tune_length,
+    #     tuneGrid  = expand.grid(
+    #       alpha  = input$glmnet_alpha,
+    #       lambda = 10^seq(-4, 1, length.out = input$glmnet_tune_length)
+    #     )
+    #   )
+    #   
+    #   test_preds <- predict(model, newdata = test_processed)
+    #   test_performance <- postResample(pred = test_preds, obs = test_processed$DEATH_RATE)
+    #   
+    # 
+    #   model_result(list(
+    #     model = model,
+    #     performance = test_performance,
+    #     test_preds = test_preds,
+    #     test_actual = test_processed$DEATH_RATE
+    #   ))
+    # })
+    
+    
+    output$model_predictions <- renderPlot({
+      result <- reactive_model()
+
+      
+      if (is.null(result$test_preds)){
+        plot.new()
+        text(
+          x = 0.5, y = 0.5,
+          labels = "No model run yet",
+          cex = 1.5,
+          font = 2
+        )
+        return()
+      }
+      
+      df_plot <- data.frame(
+        Actual = result$test_actual,
+        Pred   = result$test_preds
+      )
+      
+      
+      
+      ggplot(df_plot, aes(x = Actual, y = Pred)) +
+        geom_point(alpha = 0.6) +
+        geom_abline(slope = 1, intercept = 0, color = "red") +
+        labs(title = "Actual vs Predicted",
+             x = "Actual", 
+             y = "Predicted",
+             subtitle = paste0(nrow(df_plot)," / ", nrow(test_data), " Test Observations | ", round(result$performance[[2]], 2))) +
+        theme_minimal()
+    })
+    
+    output$model_diagnostic_plot <- renderPlot({
+      model <- reactive_model()
+      final_model <- model$model$finalModel
+      test_actual <- model$test_actual
+      test_pred   <- model$test_preds
+      model_resid  <- test_actual - test_pred
+      
+      # 2x2 layout for model diagnostics
+      par(mfrow = c(1, 2))
+      # plot(final_model, xvar = "lambda", label = TRUE) # Coefficients
+      # plot(final_model)  
+      # plot(model$model)     
+
+      plot(test_pred, model_resid, main="Residuals vs Fitted", xlab="Fitted", ylab="Residuals")
+      abline(h=0, col="red")
+      qqnorm(model_resid)
+      qqline(model_resid, col="red")
+      
+    })
+    
+    output$model_results <- renderTable({
+      model_list <- reactive_model()
+      model <- model_list$model
+      final_model <- model$finalModel
+      results <- model$results
+      final_results <- final_model$results
+      
+      perf <- model_list$performance
+      
+
+      data.frame(
+        Metric = names(perf),
+        Value = as.numeric(perf)
+      )
+      
+    })
+    
+    output$varimp_plot <- renderPlotly({
+      result <- reactive_model()
+      req(result)
+      
+      imp <- varImp(result$model)$importance
+      imp_df <- data.frame(
+        Variable   = rownames(imp),
+        Importance = imp$Overall
+      ) %>% arrange(desc(Importance)) %>% 
+        filter(Importance != 0)
+      
+      ggplotly(
+        ggplot(imp_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+          geom_col(fill = "steelblue") +
+          coord_flip() +
+          labs(title = "Variable Importance", x = NULL, y = "Importance") +
+          theme_minimal() +
+          theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+      )
+    })
+    
+    # Model equation as text for viewing
+    output$model_equation <- renderUI({
+      result <- reactive_model()
+      req(result)
+      
+      best_alpha  <- result$model$bestTune$alpha
+      best_lambda <- result$model$bestTune$lambda
+      coefs <- coef(result$model$finalModel, s = best_lambda)
+      
+      coef_df <- data.frame(
+        Variable    = rownames(coefs),
+        Coefficient = as.numeric(coefs)
+      ) %>% filter(Coefficient != 0)
+      
+      intercept <- coef_df$Coefficient[coef_df$Variable == "(Intercept)"]
+      predictors <- coef_df %>% filter(Variable != "(Intercept)")
+      
+      # Build equation string
+      terms <- paste0(
+        ifelse(predictors$Coefficient > 0, " + ", " - "),
+        round(abs(predictors$Coefficient), 3),
+        " × ", predictors$Variable,
+        collapse = ""
+      )
+      
+      equation <- paste0(
+        "DEATH_RATE = ",
+        round(intercept, 3),
+        terms
+      )
+      
+      tagList(
+        p(strong(paste0(
+          "Best Alpha: ", best_alpha,
+          " | Best Lambda: ", round(best_lambda, 4),
+          " | Non-zero Coefficients: ", nrow(predictors)
+        ))),
+        p(style = "font-family: monospace; font-size: 0.85em; 
+               word-break: break-all; background: #f8f9fa; 
+               padding: 10px; border-radius: 5px;",
+          equation
+        )
+      )
+    })
+    
+    #Plot to look at residual outliers
+    output$model_outlier_plot <- renderPlot({
+      result <- reactive_model()
+      req(result)
+      
+      df <- result$test_processed
+      #Joining test data for categorical variable columns
+      df <- df %>%
+        left_join(
+          test_data %>% select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
+          by = "CODE"
+        )
+      test_actual <- result$test_actual
+      test_preds  <- result$test_preds
+      residuals   <- test_actual - test_preds
+      
+      # Standardise residuals
+      std_resid <- residuals / sd(residuals, na.rm = TRUE)
+      
+      threshold <- input$model_outlier_sd_threshold  
+      
+      #Dataframe for plotting
+      plot_df <- data.frame(
+        Fitted    = test_preds,
+        StdResid  = std_resid,
+        CODE      = df$CODE,
+        Outlier   = abs(std_resid) > threshold,
+        GOVERN_TYPE = df$GOVERN_TYPE,
+        HEALTHCARE_BASIS = df$HEALTHCARE_BASIS
+      
+      )
+      
+      if (!isTRUE(input$model_outlier_label)){plot_df$CODE <- ""}
+
+      colour_choice <- input$model_outlier_colourby
+      if (colour_choice == "Outlier"){plot_df$ColourGroup <- as.character(plot_df$Outlier)}
+      else if (colour_choice == "GOVERN_TYPE"){plot_df$ColourGroup <- as.character(plot_df$GOVERN_TYPE)}
+      else if(colour_choice == "HEALTHCARE_BASIS"){plot_df$ColourGroup <- as.character(plot_df$HEALTHCARE_BASIS)}
+      else {plot_df$ColourGroup <- "All Observations"}
+      
+      ggplot(plot_df, aes(x = Fitted, y = StdResid)) +
+        geom_point(aes(colour = ColourGroup), alpha = 0.7) +
+        ggrepel::geom_text_repel(
+          data = plot_df[plot_df$Outlier, ],
+          aes(label = CODE), max.overlaps = 20, na.rm = TRUE
+        ) +
+        geom_hline(yintercept = c(-threshold, threshold), 
+                   colour = "red", linetype = "dashed") +
+        geom_hline(yintercept = 0, colour = "black") +
+        # scale_colour_manual(values = c("FALSE" = "steelblue", "TRUE" = "red")) +
+        labs(
+          title    = "Standardised Residuals vs Fitted",
+          x        = "Fitted Values",
+          y        = "Standardised Residuals",
+          subtitle = paste0(sum(plot_df$Outlier), " observations beyond ±", threshold, " SD")
+        ) +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+    })
+    
+    #Boxplot/density plot of residuals
+    output$outlier_density_box_plot <- renderPlot({
+      result <- reactive_model()
+      req(result)
+      
+      resid <- result$test_actual - result$test_preds
+      
+      plot_df <- data.frame(
+        CODE = as.character(result$test_processed$CODE),
+        Residual = resid,
+        stringsAsFactors = FALSE
+      )
+      
+      q1 <- quantile(plot_df$Residual, 0.25, na.rm = TRUE)
+      q3 <- quantile(plot_df$Residual, 0.75, na.rm = TRUE)
+      iqr_val <- IQR(plot_df$Residual, na.rm = TRUE)
+      
+      iqr_mult <- input$plot_iqr_mult
+      
+      lower_bound <- q1 - iqr_mult * iqr_val
+      upper_bound <- q3 + iqr_mult * iqr_val
+      
+      plot_df$Outlier <- plot_df$Residual < lower_bound | plot_df$Residual > upper_bound
+      plot_df$Label <- ifelse(plot_df$Outlier, plot_df$CODE, NA)
+      
+      #If label outlier box not ticked, then labels are blank
+      if (!isTRUE(input$outlier_boxplot_label)){plot_df$Label <- ""}
+      
+      p_density <- ggplot(plot_df, aes(x = Residual)) +
+        geom_density(fill = "steelblue", alpha = 0.4) +
+        geom_vline(xintercept = mean(plot_df$Residual, na.rm = TRUE), linetype = "dashed") +
+        labs(
+          title = "Residual Distribution",
+          y = "Density",
+          subtitle = paste0("IQR Multiplier = ", iqr_mult, "\n", sum(plot_df$Outlier), " Observations Beyond ± " , iqr_mult, " IQR Multiplier Range")
+
+        ) +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+      
+      p_box <- ggplot(plot_df, aes(x = "", y = Residual)) +
+        geom_boxplot(outlier.shape = NA, width = 0.25) +
+        geom_point(
+          data = subset(plot_df, Outlier),
+          colour = "red",
+          position = position_jitter(width = 0.05)
+        ) +
+        ggrepel::geom_text_repel(
+          data = subset(plot_df, Outlier),
+          aes(label = Label),
+          max.overlaps = 20,
+          na.rm = TRUE
+        ) +
+        coord_flip() +
+        labs(x = NULL, y = "Residual") +
+        theme_minimal() +
+        theme(
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank()
+        )
+      
+      p_density / p_box + patchwork::plot_layout(heights = c(3, 1))
+    })
+# ===================================================================================
+    
     } 
 
 )

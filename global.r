@@ -14,6 +14,7 @@ library(gtsummary)
 # install.packages("vtable")
 library(vtable)
 library(tidyr)
+library(patchwork)
 library(readr)
 library(lubridate)
 library(summarytools)
@@ -36,6 +37,8 @@ library(recipes)
 library(dbscan)
 library(ggrepel)
 library(isotree)
+library(caret)
+library(glmnet)
 
 #Data without any changes made to it
 data_og <-  read.csv('Ass2Data.csv',
@@ -109,6 +112,9 @@ chart_console <- function(...) {
     ...
   )
 }
+
+train_data <- data[data$OBS_TYPE == "Train", ]
+test_data <- data[data$OBS_TYPE == "Test", ]
 
 
 # =================================================================================
@@ -409,5 +415,52 @@ methods <- c(
   scale          = "Scale",
   center          = "Center",
   nzv            = "Remove Near-Zero Variance",
-  lincomb        = "Remove Linear Combos"
+  lincomb        = "Remove Linear Combos",
+  impute_bag        = "Impute Bagged Trees"
 )
+
+# ============================================================================
+#   DEFAULT PROCESSING PIPELINE
+# ==========================================================================
+
+# Numeric cols excluding protected ones and HEALTHCARE_COST
+train_numeric_cols <- names(train_data)[sapply(train_data, is.numeric)]
+#Excluding DEATH_RATE as it is outcome var and HEALTHCARE_COST as it is getting manually imputed
+train_numeric_cols_KNN <- setdiff(train_numeric_cols, c("DEATH_RATE", "HEALTHCARE_COST"))
+
+# Build default pipeline recipe
+default_recipe <- recipe(DEATH_RATE ~ ., data = train_data) %>%
+  update_role("CODE",     new_role = "id") %>%
+  update_role("OBS_TYPE", new_role = "split") %>%
+  step_unknown(all_nominal_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  # Step 1: Remove columns with more than 50% missing
+  step_filter_missing(all_predictors(), threshold = 0.5) %>%
+  # Step 2: Remove rows with more than 3 missing values
+  step_mutate(
+    .row_na_count = rowSums(is.na(across(everything())))
+  ) %>%
+  step_filter(.row_na_count <= 4, skip = FALSE) %>%
+  step_rm(.row_na_count) %>%
+  step_mutate(HEALTHCARE_COST = ifelse(is.na(HEALTHCARE_COST), 0, HEALTHCARE_COST)) %>%
+  step_nzv(all_predictors()) %>%
+  step_impute_knn(all_numeric_predictors(), neighbors = 5) %>%
+  # step_lincomb(all_numeric_predictors()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+
+# Prep for preview
+default_prepped <- prep(default_recipe, training = train_data)
+
+# Define steps for display in pipeline summary UI
+default_steps <- list(
+  list(id = 1, method = "remove_na_cols",  cols = NULL,          additional_info = 50),
+  list(id = 2, method = "remove_na_rows",  cols = NULL,          additional_info = 3),
+  list(id = 3, method = "impute_manual",   cols = "HEALTHCARE_COST", additional_info = 0),
+  list(id = 4, method = "nzv",             cols = train_numeric_cols, additional_info = 0),
+  list(id = 5, method = "impute_knn",      cols = train_numeric_cols_KNN,  additional_info = 5),
+  # list(id = 6, method = "lincomb",         cols = train_numeric_cols, additional_info = 0),
+  list(id = 6, method = "center",          cols = train_numeric_cols,  additional_info = 0),
+  list(id = 7, method = "scale",           cols = train_numeric_cols,  additional_info = 0)
+)
+
