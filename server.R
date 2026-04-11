@@ -4318,51 +4318,6 @@ shinyServer(function(input, output, session) {
       )
     })
     
-    # Model equation as text for viewing
-    output$model_equation <- renderUI({
-      result <- reactive_model()
-      req(result)
-      
-      best_alpha  <- result$model$bestTune$alpha
-      best_lambda <- result$model$bestTune$lambda
-      coefs <- coef(result$model$finalModel, s = best_lambda)
-      
-      coef_df <- data.frame(
-        Variable    = rownames(coefs),
-        Coefficient = as.numeric(coefs)
-      ) %>% filter(Coefficient != 0)
-      
-      intercept <- coef_df$Coefficient[coef_df$Variable == "(Intercept)"]
-      predictors <- coef_df %>% filter(Variable != "(Intercept)")
-      
-      # Build equation string
-      terms <- paste0(
-        ifelse(predictors$Coefficient > 0, " + ", " - "),
-        round(abs(predictors$Coefficient), 3),
-        " × ", predictors$Variable,
-        collapse = ""
-      )
-      
-      equation <- paste0(
-        "DEATH_RATE = ",
-        round(intercept, 3),
-        terms
-      )
-      
-      tagList(
-        p(strong(paste0(
-          "Best Alpha: ", best_alpha,
-          " | Best Lambda: ", round(best_lambda, 4),
-          " | Non-zero Coefficients: ", nrow(predictors)
-        ))),
-        p(style = "font-family: monospace; font-size: 0.85em; 
-               word-break: break-all; background: #f8f9fa; 
-               padding: 10px; border-radius: 5px;",
-          equation
-        )
-      )
-    })
-    
     #Plot to look at residual outliers
     output$model_outlier_plot <- renderPlot({
       result <- reactive_model()
