@@ -6,6 +6,7 @@ library(ggplot2)
 library(rlang)
 # install.packages("DT")
 library(DT)
+library(gt)
 library(dplyr)
 # install.packages("psych")
 library(psych)
@@ -39,6 +40,8 @@ library(ggrepel)
 library(isotree)
 library(caret)
 library(glmnet)
+library(DescTools)
+library(aplpack)
 
 #Data without any changes made to it
 data_og <-  read.csv('Ass2Data.csv',
@@ -416,7 +419,10 @@ methods <- c(
   center          = "Center",
   nzv            = "Remove Near-Zero Variance",
   lincomb        = "Remove Linear Combos",
-  impute_bag        = "Impute Bagged Trees"
+  impute_bag        = "Impute Bagged Trees",
+  replace_outliers  = "Replace Outliers",
+  winsorize        = "Winsorize Outliers",
+  remove_outliers        = "Remove Multivariate Outliers"
 )
 
 # ============================================================================
