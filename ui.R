@@ -342,7 +342,7 @@ shinyUI(
                             pickerInput("selected_data_EDA",
                                         "Data",
                                         choices = c("Base Data", "Train Split", "Test Split"),
-                                        selected = "Train Split"),
+                                        selected = "Base Data"),
                             
                             # ── Missing Values Controls ─────────────────────────
                             h6("Missing Values", style = "font-weight: bold;"),
@@ -666,7 +666,7 @@ shinyUI(
                                                                          condition = "input.selected_vars_boxplot_outlier.length == 1",
                                                                          pickerInput(
                                                                            inputId = "colour_by_boxplot_outlier",
-                                                                           label   = "Colour By",
+                                                                           label   = "Split By",
                                                                            choices = c("GOVERN_TYPE", "HEALTHCARE_BASIS"),
                                                                            selected = NULL, multiple = TRUE,
                                                                            options = list(`actions-box` = TRUE, `live-search` = TRUE)
@@ -735,8 +735,12 @@ shinyUI(
                                                                        checkboxInput(
                                                                          inputId = "outlier_scatter_mark",
                                                                          label = "Highlight Outlier",
-                                                                         value = FALSE
-                                                                       )
+                                                                         value = TRUE
+                                                                       ),
+                                                                       pickerInput("univariate_facet",
+                                                                                   "Facet Wrap (Only Available for Mahalanobis Plot)",
+                                                                                   choices = c("None", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                                                   selected = 'None')
                                                                      )
                                                                    )
                                                    )
@@ -771,11 +775,12 @@ shinyUI(
                                                                            `live-search` = TRUE
                                                                          )
                                                                        ),
+                                                                       
                                                                        pickerInput(
                                                                          inputId = "outlier_bivariate_scatter_method",
                                                                          label = "Outlier Criteria",
                                                                          choices = c("Bagplot", "Mahalanobis Distance"),
-                                                                         selected = "Bagplot Inflation Factor",
+                                                                         selected = "Mahalanobis Distance",
                                                                          multiple = FALSE,
                                                                          options = list(
                                                                            `actions-box` = TRUE,
@@ -804,7 +809,11 @@ shinyUI(
                                                                          inputId = "outlier_bivariate_scatter_mark",
                                                                          label = "Label Outliers",
                                                                          value = TRUE
-                                                                       )
+                                                                       ),
+                                                                       pickerInput("bivariate_facet",
+                                                                                   "Facet Wrap (Only Available for Mahalanobis Plot)",
+                                                                                   choices = c("None", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                                                   selected = 'None')
                                                                      )
                                                                    )
                                                    )
@@ -838,7 +847,7 @@ shinyUI(
                                                                      ),
                                                                      conditionalPanel(
                                                                        condition = "input.outlier_distance_method_plot == 'Isolation Forest'",
-                                                                       numericInput("iso_for_threshold", "Threshold", value = 0.45, min = 0, max = 1)
+                                                                       numericInput("iso_for_threshold", "Threshold", value = 0.45, min = 0, max = 1, step = 0.05)
                                                                      ),
                                                                      div(style = "display:flex;justify-content:flex-end;align-items:center;",
                                                                          actionButton("reset_plot_input_outlier_pattern", "Reset"))
@@ -925,9 +934,16 @@ shinyUI(
                tabPanel("GLM Net Model",
                         layout_sidebar(
                           sidebar = sidebar(
-                            title = "Pipeline",
                             width = "350px",
                             open = "open",
+                            
+                            radioButtons(
+                              "outlier_display_data",
+                              "Data",
+                              choices = c("Test", "Train", "Both"),
+                              selected = "Test",
+                              inline = TRUE
+                            ),
                             
                             pickerInput(
                               inputId  = "selected_pipeline_model",
@@ -958,6 +974,9 @@ shinyUI(
                             tabPanel("Model Summary",
                                      plotOutput("model_predictions")),
                             
+                            tabPanel("Model Coefficients",
+                                     plotlyOutput("coef_plot")),
+                            
                             tabPanel("Variable Importance",
                                      plotlyOutput("varimp_plot")),
                             
@@ -986,15 +1005,7 @@ shinyUI(
                                                         )
                                                       ),
                                                       
-                                                      column(
-                                                        width = 4,
-                                                        radioButtons(
-                                                          "outlier_display_data",
-                                                          "Data",
-                                                          choices = c("Test", "Train", "Both"),
-                                                          selected = "Test",
-                                                          inline = TRUE
-                                                        )),
+
                                                       
                                                       column(
                                                         width = 8,
@@ -1018,6 +1029,15 @@ shinyUI(
                                                               div(
                                                                 style = "padding-top: 30px;",
                                                                 checkboxInput("model_outlier_label", "Label Outliers", TRUE)
+                                                              )
+                                                            ),
+                                                            column(
+                                                              width = 5,
+                                                              pickerInput(
+                                                                "model_outlier_colourby",
+                                                                "Colour By",
+                                                                choices = c("None", "Outlier", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                                selected = "Outlier"
                                                               )
                                                             )
                                                           )
@@ -1047,12 +1067,13 @@ shinyUI(
                                                             column(
                                                               width = 5,
                                                               pickerInput(
-                                                                "model_outlier_colourby",
+                                                                "model_outlier_boxplot_colourby",
                                                                 "Colour By",
-                                                                choices = c("None", "Outlier", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
-                                                                selected = "Outlier"
+                                                                choices = c("None","GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                                selected = "None"
                                                               )
                                                             )
+                                                            
                                                           )
                                                         )
                                                       )
@@ -1064,47 +1085,101 @@ shinyUI(
                             
                             
 
-                            tabPanel("Cooks Distance"),
+                            tabPanel("Residual by Predictor",
+                                     plotOutput("resid_predictor"),
+                                     accordion( open = TRUE,
+                                       accordion_panel("Plot Controls",
+                                         chart_console(
+                                           fluidRow(
+                                             column(2,
+                                             pickerInput("resid_predictor_selected",
+                                                         "Predictor",
+                                                         choices = NULL,
+                                                         selected = NULL,
+                                                         multiple = FALSE,
+                                                         options  = list(`live-search` = TRUE))
+                                             ),
+                                             column(2, 
+                                             sliderInput(
+                                               "resid_predictor_iqr_mult",
+                                               "IQR Multiplier",
+                                               min = 0,
+                                               max = 5,
+                                               value = 1.5,
+                                               step = 0.5
+                                             )
+                                             ),
+                                             column(2,
+                                             checkboxInput("resid_predict_label", "Label Outliers", value = TRUE),
+                                             conditionalPanel(
+                                               #Checking if selected col is in non_cat_vars
+                                               condition = paste0(
+                                                 "['", paste(names(non_cat_vars), collapse = "','"), "'].includes(input.resid_predictor_selected)"
+                                               ),
+                                             checkboxInput("resid_predict_outlier_colour", "Colour By Outlier", value = TRUE),
+                                             checkboxInput("resid_predict_smooth_line", "Add Trend Line", value = FALSE))
+                                             ),
+                                             
+                                             conditionalPanel(
+                                               #Checking if selected col is in non_cat_vars
+                                               condition = paste0(
+                                                 "['", paste(names(non_cat_vars), collapse = "','"), "'].includes(input.resid_predictor_selected)"
+                                               ),
+                                               pickerInput("interaction_cat_var",
+                                                           "Facet Wrap (Optional)",
+                                                           choices = c("None", "GOVERN_TYPE", "HEALTHCARE_BASIS"),
+                                                           selected = 'None'),
+                                               
+                                             )
+                                           )#fluid row end
+                                         )
+                                       )
+                                     )
+                                     
+                                     ),#tab panel end
                             
-                            tabPanel("Mahalanobis"),
+                            tabPanel("Data Table",
+                                     div(
+                                       style = "width: 100%; overflow-x: auto;",
+                                       DTOutput("glm_data")
+                                     ),
+                                     accordion(open = FALSE,
+                                               accordion_panel("Model Details",
+                                                               chart_console(
+                                                                 checkboxInput("glm_data_unstandardize",
+                                                                               "Unstandardize Data",
+                                                                               value = FALSE),
+                                                                 pickerInput(
+                                                                   inputId = "glm_data_vars",
+                                                                   label = "Select Variables",
+                                                                   choices = NULL,
+                                                                   selected = NULL,
+                                                                   multiple = TRUE,
+                                                                   options = list(
+                                                                     `actions-box` = TRUE,  
+                                                                     `live-search` = TRUE    
+                                                                   )
+                                                                 ),
+                                                                 downloadButton('glm_data_export', 
+                                                                                'Export Data')
+                                                               )
+                                                               ) #accordion panel close
+                                               )#accordion close
+                            ),#data table tab end bracket
                             
                           ),#tabset panel end bracket
                           
-                          chart_console(
+                          accordion(open = FALSE,
+                                    accordion_panel("Model Details",
+                                                    chart_console(
                               
                             
-                            h6("Model Hyperparameters", style = "font-weight: bold; margin-bottom: 10px;"),
-                            
-                          fluidRow(
-                            
-                            # # GLM family
-                            # column(2,
-                            #        selectInput(
-                            #          "glm_family",
-                            #          "Model Family",
-                            #          choices = c(
-                            #            "Gaussian"  = "gaussian",
-                            #            "Poisson"   = "poisson"
-                            #          ),
-                            #          selected = "gaussian"
-                            #        )
-                            # ),
-                            
 
-                            # Alpha - elastic net mixing - Hashed out for now as alpha calculated with grid search
-                            # column(2,
-                            #        sliderInput(
-                            #   "glmnet_alpha",
-                            #   "Alpha (0=Ridge, 1=Lasso)",
-                            #   min   = 0,
-                            #   max   = 1,
-                            #   value = 0.5,
-                            #   step  = 0.1
-                            # )
-                            # ),
+                          fluidRow(
                             
                             # Lambda tuning
                             column(2,
+                                   fluidRow(
                                    sliderInput(
                                      "glmnet_tune_length",
                                      "Lambda Tune Length",
@@ -1115,7 +1190,7 @@ shinyUI(
                                    )
                             ),
                             # Cross validation folds
-                            column(2,
+                            fluidRow(
                                    sliderInput(
                                      "cv_folds",
                                      "CV Folds",
@@ -1127,7 +1202,7 @@ shinyUI(
                             ),
                             
                             # CV repeats
-                            column(2,
+                            fluidRow(
                                    sliderInput(
                                      "cv_repeats",
                                      "CV Repeats",
@@ -1136,7 +1211,7 @@ shinyUI(
                                      value = 1,
                                      step  = 1
                                    )
-                            ),
+                            )),
                             
                             # Run button
                             column(2,
@@ -1158,10 +1233,9 @@ shinyUI(
                                    )
                             )
                           )
-                          ),#Hyperparameter Panel End bracket
+                          ))),#Hyperparameter Panel End bracket
                           
-                          # uiOutput("model_equation")
-                          
+
                         # div(
                         #   style = "width:50%",
                         #   tableOutput("model_results")

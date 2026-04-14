@@ -422,8 +422,13 @@ methods <- c(
   impute_bag        = "Impute Bagged Trees",
   replace_outliers  = "Replace Outliers",
   winsorize        = "Winsorize Outliers",
-  remove_outliers        = "Remove Multivariate Outliers"
+  remove_outliers        = "Remove Multivariate Outliers",
+  impute_manual_cat = "Impute — GOVERN_TYPE ",
+  interaction_term = "Add Interaction Term ",
+  remove_obs = "Remove Specific Observations"
+  
 )
+
 
 # ============================================================================
 #   DEFAULT PROCESSING PIPELINE
@@ -438,8 +443,6 @@ train_numeric_cols_KNN <- setdiff(train_numeric_cols, c("DEATH_RATE", "HEALTHCAR
 default_recipe <- recipe(DEATH_RATE ~ ., data = train_data) %>%
   update_role("CODE",     new_role = "id") %>%
   update_role("OBS_TYPE", new_role = "split") %>%
-  step_unknown(all_nominal_predictors()) %>%
-  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
   # Step 1: Remove columns with more than 50% missing
   step_filter_missing(all_predictors(), threshold = 0.5) %>%
   # Step 2: Remove rows with more than 3 missing values
@@ -453,7 +456,9 @@ default_recipe <- recipe(DEATH_RATE ~ ., data = train_data) %>%
   step_impute_knn(all_numeric_predictors(), neighbors = 5) %>%
   # step_lincomb(all_numeric_predictors()) %>%
   step_center(all_numeric_predictors()) %>%
-  step_scale(all_numeric_predictors())
+  step_scale(all_numeric_predictors()) %>%  
+step_unknown(all_nominal_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
 
 # Prep for preview
 default_prepped <- prep(default_recipe, training = train_data)

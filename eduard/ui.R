@@ -1,153 +1,344 @@
-# ui.R - CORRECTED WITH TOGGLE BUTTON ABOVE THE PLOT
+# ui.R 
 
 ui <- navbarPage(
   title = "DATA423 Assignment 2 - Eduard Bradley",
   theme = shinytheme("cerulean"),
   useShinyjs(),
   
-  # Add custom CSS for sidebar toggling
+  # ============================================================================
+  # CONSOLIDATED CUSTOM CSS
+  # ============================================================================
+  
   tags$head(
+    # CSS Styles
     tags$style(HTML("
+    /* Base sidebar wrapper styles */
     .sidebar-wrapper {
       position: relative;
-      transition: all 0.3s ease;
     }
-    .sidebar-hidden .sidebar-panel {
+    
+    /* Hide sidebar panels */
+    .sidebar-hidden .sidebar-panel,
+    .sidebar-wrapper.sidebar-hidden .sidebar-panel {
       display: none !important;
     }
+    
+    /* Expand main panel when sidebar hidden */
     .sidebar-hidden .main-panel {
       width: 100% !important;
       margin-left: 0 !important;
+      flex: 0 0 100% !important;
+      max-width: 100% !important;
     }
-    .sidebar-panel {
+    
+    /* For all tab wrappers - target the sidebar column directly */
+    .sidebar-wrapper.sidebar-hidden .col-sm-3 {
+      display: none !important;
+    }
+    
+    .sidebar-wrapper.sidebar-hidden .col-sm-9 {
+      width: 100% !important;
+      margin-left: 0 !important;
+      flex: 0 0 100% !important;
+      max-width: 100% !important;
+    }
+    
+    /* Specific rule for each tab wrapper */
+    #boxplot_wrapper.sidebar-hidden .col-sm-3,
+    #correlation_wrapper.sidebar-hidden .col-sm-3,
+    #datatable_wrapper.sidebar-hidden .col-sm-3,
+    #heatmap_wrapper.sidebar-hidden .col-sm-3,
+    #distribution_wrapper.sidebar-hidden .col-sm-3,
+    #scatter_wrapper.sidebar-hidden .col-sm-3,
+    #mosaic_wrapper.sidebar-hidden .col-sm-3,
+    #ggpairs_wrapper.sidebar-hidden .col-sm-3,
+    #tabplot_wrapper.sidebar-hidden .col-sm-3,
+    #rising_wrapper.sidebar-hidden .col-sm-3 {
+      display: none !important;
+    }
+    
+    #boxplot_wrapper.sidebar-hidden .col-sm-9,
+    #correlation_wrapper.sidebar-hidden .col-sm-9,
+    #datatable_wrapper.sidebar-hidden .col-sm-9,
+    #heatmap_wrapper.sidebar-hidden .col-sm-9,
+    #distribution_wrapper.sidebar-hidden .col-sm-9,
+    #scatter_wrapper.sidebar-hidden .col-sm-9,
+    #mosaic_wrapper.sidebar-hidden .col-sm-9,
+    #ggpairs_wrapper.sidebar-hidden .col-sm-9,
+    #tabplot_wrapper.sidebar-hidden .col-sm-9,
+    #rising_wrapper.sidebar-hidden .col-sm-9 {
+      width: 100% !important;
+      margin-left: 0 !important;
+      flex: 0 0 100% !important;
+      max-width: 100% !important;
+    }
+    
+    /* Master sidebar wrapper for Data Processing Strategy */
+    #master_sidebar_wrapper.sidebar-hidden #master_sidebar_panel {
+      display: none !important;
+    }
+    
+    #master_sidebar_wrapper.sidebar-hidden #master_main_panel {
+      width: 100% !important;
+      margin-left: 0 !important;
+      flex: 0 0 100% !important;
+      max-width: 100% !important;
+    }
+    
+    /* GLMNET Modeling sidebar toggle */
+    #model_sidebar_wrapper.sidebar-hidden {
+      display: none !important;
+    }
+    
+    #model_main_content_wrapper {
       transition: all 0.3s ease;
     }
-    .main-panel {
-      transition: all 0.3s ease;
-    }
+    
+    /* Toggle button container */
     .toggle-container {
       margin-bottom: 15px;
       text-align: right;
     }
     
-    /* Specific rule for correlation tab - target the sidebar column */
-    #correlation_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #correlation_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
+    .toggle-sidebar-btn {
+      margin-bottom: 10px;
     }
     
-    /* Specific rule for datatable tab */
-    #datatable_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
+    /* Collapsible sections for GLMNET sidebar */
+    .collapsible-section {
+      margin-bottom: 10px;
     }
-    #datatable_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for heatmap tab */
-    #heatmap_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #heatmap_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for distribution tab */
-    #distribution_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #distribution_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for boxplot tab */
-    #boxplot_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #boxplot_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for scatter tab */
-    #scatter_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #scatter_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for mosaic tab */
-    #mosaic_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #mosaic_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for ggpairs tab */
-    #ggpairs_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #ggpairs_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for tabplot tab */
-    #tabplot_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #tabplot_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    
-    /* Specific rule for rising values tab */
-    #rising_wrapper.sidebar-hidden .col-sm-3 {
-      display: none !important;
-    }
-    #rising_wrapper.sidebar-hidden .col-sm-9 {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-  "))
-  ),
-  
-  # Add custom CSS for master sidebar toggling
-  tags$head(
-    tags$style(HTML("
-    /* Existing CSS remains here */
-    
-    /* Master sidebar toggle styles */
-    #master_sidebar_wrapper.sidebar-hidden #master_sidebar_panel {
-      display: none !important;
-    }
-    #master_sidebar_wrapper.sidebar-hidden #master_main_panel {
-      width: 100% !important;
-      margin-left: 0 !important;
-    }
-    #master_sidebar_panel {
+    .collapsible-header {
+      background-color: #f8f9fa;
+      cursor: pointer;
+      padding: 10px;
+      border-radius: 4px;
+      font-weight: bold;
+      color: #2C3E50;
       transition: all 0.3s ease;
     }
-    #master_main_panel {
-      transition: all 0.3s ease;
+    .collapsible-header:hover {
+      background-color: #e9ecef;
     }
+    .collapsible-content {
+      padding: 10px;
+      border-left: 2px solid #dee2e6;
+      border-right: 2px solid #dee2e6;
+      border-bottom: 2px solid #dee2e6;
+      border-radius: 0 0 4px 4px;
+    }
+    .collapsible-icon {
+      float: right;
+      transition: transform 0.3s ease;
+    }
+    .collapsed .collapsible-icon {
+      transform: rotate(-90deg);
+    }
+    
+    /* Style for HTML5 range sliders */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: #e9ecef;
+      border-radius: 5px;
+      height: 4px;
+      width: 100%;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      background: #13D4D4;
+      border-radius: 50%;
+      cursor: pointer;
+      height: 16px;
+      width: 16px;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+      background: #0fb0b0;
+    }
+    input[type=range]::-moz-range-thumb {
+      background: #13D4D4;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      height: 16px;
+      width: 16px;
+    }
+    
+    /* Help button style */
+    .btn-help {
+      cursor: help;
+      border-bottom: 1px dotted #999;
+    }
+    ")),
+    
+    # =========================================================================
+    # JAVASCRIPT - Place ALL JavaScript here inside tags$script(HTML(...))
+    # =========================================================================
+    tags$script(HTML("
+      $(document).on('input', '#glmnet_alpha_slider', function() {
+        document.getElementById('glmnet_alpha').value = this.value;
+        Shiny.setInputValue('glmnet_alpha', parseFloat(this.value));
+      });
+      
+      $(document).on('input', '#residual_iqr_slider', function() {
+        Shiny.setInputValue('residual_iqr', parseFloat(this.value));
+      });
+      
+      $(document).on('input', '#residual_boxplot_iqr_slider', function() {
+        Shiny.setInputValue('residual_boxplot_iqr', parseFloat(this.value));
+      });
+      
+      Shiny.addCustomMessageHandler('update_dataset_picker', function(message) {
+        var select = document.getElementById('model_dataset_select');
+        if (select) {
+          select.innerHTML = '';
+          for (var i = 0; i < message.choices.length; i++) {
+            var option = document.createElement('option');
+            option.value = message.choices[i];
+            option.text = message.choices[i];
+            select.appendChild(option);
+          }
+          if (message.selected) {
+            select.value = message.selected;
+          } else if (message.choices.length > 0) {
+            select.value = message.choices[0];
+          }
+          var event = new Event('change', { bubbles: true });
+          select.dispatchEvent(event);
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('update_recipe_picker', function(message) {
+        console.log('Recipes updated:', message.choices);
+      });
+      
+      Shiny.addCustomMessageHandler('update_progress', function(message) {
+        var statusDiv = document.getElementById('progress_status');
+        var barDiv = document.getElementById('progress_bar');
+        if (statusDiv) statusDiv.innerHTML = message.status;
+        if (barDiv) {
+          barDiv.style.width = message.percent + '%';
+          barDiv.innerHTML = message.percent + '%';
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('click_process_btn', function(message) {
+        var btn = document.getElementById('process_data_btn');
+        if (btn) {
+          btn.click();
+        }
+      });
+      
+      $(document).ready(function() {
+        $('.collapsible-header').click(function() {
+          var content = $(this).next('.collapsible-content');
+          content.slideToggle(200);
+          $(this).toggleClass('collapsed');
+        });
+      });
     "))
   ),
   
+  # ==========================================================================
+  # TAB 1: INTRODUCTION
+  # ==========================================================================
+  
+  tabPanel("Introduction",
+           fluidPage(
+             h2("Covid-19 Data Analysis: Predicting Death Rates"),
+             hr(),
+             
+             fluidRow(
+               column(12,
+                      div(class = "well",
+                          h4("Background"),
+                          p("Covid-19 data, all measurements are as at 2019."),
+                          br(),
+                          h4("Dataset Variables"),
+                          p("The supplied CSV contains the following variables:"),
+                          tags$ul(
+                            tags$li(tags$strong("CODE"), " - Anonymised state or country"),
+                            tags$li(tags$strong("GOVERN_TYPE"), " - Type of government: 'STABLE DEM', 'UNSTABLE DEM', 'DICTATORSHIP', 'OTHER'"),
+                            tags$li(tags$strong("POPULATION"), " - Total population"),
+                            tags$li(tags$strong("AGE25_PROPTN"), " - The proportion of the population that is at or below 25"),
+                            tags$li(tags$strong("AGE_MEDIAN"), " - The median age of the population"),
+                            tags$li(tags$strong("AGE50_PROPTN"), " - The proportion of the population that is at or above 50"),
+                            tags$li(tags$strong("POP_DENSITY"), " - The population density"),
+                            tags$li(tags$strong("GDP"), " - The Gross National Product"),
+                            tags$li(tags$strong("INFANT_MORT"), " - The infant mortality rate"),
+                            tags$li(tags$strong("DOCS"), " - The number of doctors per 10,000"),
+                            tags$li(tags$strong("VAX_RATE"), " - The mean vaccination rate for Covid-19"),
+                            tags$li(tags$strong("HEALTHCARE_BASIS"), " - Type of healthcare system: 'INSURANCE', 'PRIVATE', 'FREE'"),
+                            tags$li(tags$strong("HEALTHCARE_COST"), " - Healthcare costs per person where applicable"),
+                            tags$li(tags$strong("DEATH_RATE"), tags$em("(Outcome Variable)"), " - The projected death rate (across ten years)"),
+                            tags$li(tags$strong("OBS_TYPE"), " - The allocation to test or train")
+                          ),
+                          br(),
+                          p("The outcome variable is the ", tags$strong("DEATH_RATE"), ".")
+                      )
+               )
+             ),
+             
+             hr(),
+             
+             fluidRow(
+               column(6, 
+                      div(class = "well", 
+                          h4("Data Description"), 
+                          hr(), 
+                          textOutput("intro_data_desc")
+                      )
+               ),
+               column(6, 
+                      div(class = "well", 
+                          h4("Missingness Strategy"), 
+                          hr(), 
+                          textOutput("intro_missing_strategy")
+                      )
+               )
+             ),
+             
+             fluidRow(
+               column(6, 
+                      div(class = "well", 
+                          h4("Outlier Strategy"), 
+                          hr(), 
+                          textOutput("intro_outlier_strategy")
+                      )
+               ),
+               column(6, 
+                      div(class = "well", 
+                          h4("Pre-processing Strategy"), 
+                          hr(), 
+                          textOutput("intro_preprocess_strategy")
+                      )
+               )
+             ),
+             
+             fluidRow(
+               column(6, 
+                      div(class = "well", 
+                          h4("GLMNET Explanation"), 
+                          hr(), 
+                          textOutput("intro_glmnet_explanation")
+                      )
+               ),
+               column(12, 
+                      div(class = "well", 
+                          h4("Note"), 
+                          hr(), 
+                          p("This application allows you to explore the data, process it with custom recipes, 
+                          train GLMNET models, and evaluate performance. Use the tabs above to navigate 
+                          through the analysis workflow.")
+                      )
+               )
+             )
+           )
+  ),
+  
   
   # ==========================================================================
   # ==========================================================================
-  # TAB 1: SUMMARY & EDA
+  # TAB 2: SUMMARY & EDA
   # ==========================================================================
   # ==========================================================================
   
@@ -380,6 +571,7 @@ ui <- navbarPage(
                                            # -----------------------------
                                            # Categorical Filters (for subsetting data)
                                            # -----------------------------
+                                           hr(),
                                            h4("Filter Data by Categorical Variables:"),
                                            pickerInput("boxplot_filter_vars", "Select Categorical Variables to Filter:", 
                                                        choices = c("GOVERN_TYPE", "HEALTHCARE_BASIS", "OBS_TYPE"),
@@ -387,7 +579,7 @@ ui <- navbarPage(
                                                        multiple = TRUE,
                                                        options = list(`actions-box` = TRUE, `live-search` = TRUE)),
                                            
-                                           uiOutput("boxplot_cat_filters"),
+                                           uiOutput("boxplot_cat_filters_ui"),
                                            
                                            hr(),
                                            
@@ -517,7 +709,8 @@ ui <- navbarPage(
                                                        multiple = TRUE,
                                                        options = list(`actions-box` = TRUE, `live-search` = TRUE)),
                                            
-                                           uiOutput("corr_categorical_filters"),
+                                           # Dynamic UI for checkboxes will appear here
+                                           uiOutput("corr_cat_filters_ui"),
                                            
                                            hr(),
                                            
@@ -1110,20 +1303,37 @@ ui <- navbarPage(
                                         ),
                                         br(),
                                         hr(),
-                                        bsCollapse(
-                                          id = "ggpairs_summary_collapse",
-                                          open = NULL,
-                                          bsCollapsePanel(
-                                            title = "GGpairs Plot Summary",
-                                            style = "info",
-                                            verbatimTextOutput("ggpairs_obs_count")
+                                        
+                                        # Collapsible GGpairs Summary
+                                        tags$div(
+                                          class = "panel-group",
+                                          tags$div(
+                                            class = "panel panel-default",
+                                            tags$div(
+                                              class = "panel-heading",
+                                              tags$h4(
+                                                class = "panel-title",
+                                                tags$a(`data-toggle` = "collapse", href = "#collapseGGpairsStats", 
+                                                       "GGpairs Plot Summary",
+                                                       style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                              )
+                                            ),
+                                            tags$div(
+                                              id = "collapseGGpairsStats",
+                                              class = "panel-collapse collapse",
+                                              tags$div(
+                                                class = "panel-body",
+                                                verbatimTextOutput("ggpairs_obs_count")
+                                              )
+                                            )
                                           )
                                         )
-                              )
-                            )
-                        )
-               ),
+                              ) 
+                            )  
+                        )  
+               ),  
                
+          
                # ==========================================================================
                # 9. TABPLOT SUB-TAB
                # ==========================================================================
@@ -1421,9 +1631,7 @@ ui <- navbarPage(
   
   
   # ==========================================================================
-  # ==========================================================================
-  # TAB 2: DATA PROCESSING STRATEGY (Missingness + Outlier Analysis Only)
-  # ==========================================================================
+  # TAB 3: DATA PROCESSING STRATEGY (Missingness + Outlier Analysis Only)
   # ==========================================================================
   
   tabPanel("Data Processing Strategy",
@@ -1455,12 +1663,12 @@ ui <- navbarPage(
                               h5("Variable Selection"),
                               pickerInput("master_cat_vars", "Categorical Variables:", 
                                           choices = categorical_cols[categorical_cols != "CODE"], 
-                                          selected = categorical_cols[categorical_cols != "CODE"],  # Default selected
+                                          selected = categorical_cols[categorical_cols != "CODE"],
                                           multiple = TRUE,
                                           options = list(`actions-box` = TRUE, `live-search` = TRUE)),
                               pickerInput("master_numeric_vars", "Numeric Variables:", 
                                           choices = numeric_cols, 
-                                          selected = numeric_cols,  # Default selected
+                                          selected = numeric_cols,
                                           multiple = TRUE,
                                           options = list(`actions-box` = TRUE, `live-search` = TRUE)),
                               hr(),
@@ -1490,16 +1698,13 @@ ui <- navbarPage(
                    column(9, id = "master_main_panel",
                           tabsetPanel(id = "processing_tabs",
                                       
-                                      # ================================================================
-                                      # SUB-TAB 1: MISSINGNESS ANALYSIS
-                                      # ================================================================
+                                      # Missingness Analysis Sub-tab
                                       tabPanel("Missingness Analysis",
                                                br(),
                                                tabsetPanel(
                                                  tabPanel("Missing Values Heatmap",
                                                           br(),
-                                                          shinycssloaders::withSpinner(plotlyOutput("proc_missing_heatmap", height = "550px"),
-                                                                                       type = 4, color = "#2C3E50")
+                                                          shinycssloaders::withSpinner(plotlyOutput("proc_missing_heatmap", height = "550px"), type = 4, color = "#2C3E50")
                                                  ),
                                                  tabPanel("Missingness Combinations (Upset)",
                                                           br(),
@@ -1527,7 +1732,10 @@ ui <- navbarPage(
                                                             column(6,
                                                                    selectInput("missing_target_var", "Predict when this variable is missing:", choices = names(df), selected = "HEALTHCARE_COST"),
                                                                    checkboxGroupInput("missing_rpart_types", "Missing Value Types:", choices = c("-99" = "neg99", "--" = "dash", "'NA'" = "na_string", "R NA" = "r_na"), selected = c("neg99", "dash", "na_string", "r_na")),
-                                                                   pickerInput("missing_predictors", "Predictor Variables:", choices = names(df), selected = names(df), multiple = TRUE),
+                                                                   pickerInput("missing_predictors", "Predictor Variables:", 
+                                                                               choices = names(df)[!names(df) %in% c("CODE")],
+                                                                               selected = names(df)[!names(df) %in% c("CODE", "DEATH_RATE", "OBS_TYPE")],
+                                                                               multiple = TRUE),
                                                                    actionButton("run_missing_rpart", "Build Missingness Tree", class = "btn-primary", style = "width: 100%;")
                                                             ),
                                                             column(6,
@@ -1559,20 +1767,27 @@ ui <- navbarPage(
                                                )
                                       ),
                                       
-                                      # ================================================================
-                                      # SUB-TAB 2: OUTLIER ANALYSIS
-                                      # ================================================================
+                                      # Outlier Analysis Sub-tab
                                       tabPanel("Outlier Analysis",
                                                br(),
                                                fluidRow(
                                                  column(3,
-                                                        div(class = "control-card", h4("Mahalanobis Distance"), sliderInput("outlier_mahalanobis_threshold", "Chi-Square Threshold:", min = 0.9, max = 0.9999, value = 0.999, step = 0.001)),
-                                                        div(class = "control-card", h4("Cook's Distance"), selectInput("outlier_cooks_method", "Threshold Method:", choices = c("4 * mean" = "4mean", "4/n" = "4n", "Quantile 0.99" = "quantile"), selected = "4mean")),
-                                                        div(class = "control-card", h4("Local Outlier Factor"), sliderInput("outlier_lof_minpts", "minPts (neighbors):", min = 3, max = 10, value = 5, step = 1), sliderInput("outlier_lof_threshold", "LOF Threshold:", min = 1, max = 5, value = 2, step = 0.1)),
-                                                        div(class = "control-card", h4("One-Class SVM"), sliderInput("outlier_svm_nu", "nu parameter:", min = 0.01, max = 0.5, value = 0.05, step = 0.01), selectInput("outlier_svm_kernel", "Kernel:", choices = c("linear", "radial", "polynomial", "sigmoid"), selected = "linear")),
-                                                        div(class = "control-card", h4("Random Forest"), sliderInput("outlier_rf_iqr", "IQR Multiplier for Residuals:", min = 1, max = 5, value = 2, step = 0.5)),
-                                                        div(class = "control-card", h4("Isolation Forest"), sliderInput("outlier_if_threshold", "Isolation Forest Threshold:", min = 0.5, max = 0.9, value = 0.6, step = 0.01)),
-                                                        div(class = "control-card", h4("Consensus Table Filter"), sliderInput("outlier_min_flags", "Minimum number of methods flagging:", min = 1, max = 6, value = 2, step = 1, post = " methods"))
+                                                        div(class = "control-card", h4("Mahalanobis Distance"), 
+                                                            sliderInput("outlier_mahalanobis_threshold", "Chi-Square Threshold:", min = 0.9, max = 0.9999, value = 0.999, step = 0.001)),
+                                                        div(class = "control-card", h4("Cook's Distance"), 
+                                                            selectInput("outlier_cooks_method", "Threshold Method:", choices = c("4 * mean" = "4mean", "4/n" = "4n", "Quantile 0.99" = "quantile"), selected = "4mean")),
+                                                        div(class = "control-card", h4("Local Outlier Factor"), 
+                                                            sliderInput("outlier_lof_minpts", "minPts (neighbors):", min = 3, max = 10, value = 5, step = 1), 
+                                                            sliderInput("outlier_lof_threshold", "LOF Threshold:", min = 1, max = 5, value = 2, step = 0.1)),
+                                                        div(class = "control-card", h4("One-Class SVM"), 
+                                                            sliderInput("outlier_svm_nu", "nu parameter:", min = 0.01, max = 0.5, value = 0.05, step = 0.01), 
+                                                            selectInput("outlier_svm_kernel", "Kernel:", choices = c("linear", "radial", "polynomial", "sigmoid"), selected = "linear")),
+                                                        div(class = "control-card", h4("Random Forest"), 
+                                                            sliderInput("outlier_rf_iqr", "IQR Multiplier for Residuals:", min = 1, max = 5, value = 2, step = 0.5)),
+                                                        div(class = "control-card", h4("Isolation Forest"), 
+                                                            sliderInput("outlier_if_threshold", "Isolation Forest Threshold:", min = 0.5, max = 0.9, value = 0.6, step = 0.01)),
+                                                        div(class = "control-card", h4("Consensus Table Filter"), 
+                                                            sliderInput("outlier_min_flags", "Minimum number of methods flagging:", min = 1, max = 6, value = 2, step = 1, post = " methods"))
                                                  ),
                                                  column(9,
                                                         tabsetPanel(
@@ -1582,36 +1797,149 @@ ui <- navbarPage(
                                                                    br(),
                                                                    div(class = "well", style = "padding: 15px; margin-top: 10px;",
                                                                        fluidRow(
-                                                                         column(4, h5("Display Controls", style = "margin-top: 0;"), sliderInput("outlier_display_count", "Number of outliers to display:", min = 5, max = 100, value = 20, step = 5)),
+                                                                         column(4, 
+                                                                                h5("Display Controls", style = "margin-top: 0;"), 
+                                                                                sliderInput("outlier_display_count", "Number of outliers to display:", min = 5, max = 100, value = 20, step = 5)
+                                                                         ),
                                                                          column(8,
                                                                                 h5("Select Methods to Include", style = "margin-top: 0;"),
-                                                                                fluidRow(column(4, checkboxInput("show_mahalanobis", "Mahalanobis Distance", value = TRUE)), column(4, checkboxInput("show_cooks", "Cook's Distance", value = TRUE)), column(4, checkboxInput("show_lof", "Local Outlier Factor", value = TRUE))),
-                                                                                fluidRow(column(4, checkboxInput("show_svm", "One-Class SVM", value = TRUE)), column(4, checkboxInput("show_rf", "Random Forest Residuals", value = TRUE)), column(4, checkboxInput("show_iforest", "Isolation Forest", value = TRUE)))
+                                                                                fluidRow(
+                                                                                  column(4, checkboxInput("show_mahalanobis", "Mahalanobis Distance", value = TRUE)),
+                                                                                  column(4, checkboxInput("show_cooks", "Cook's Distance", value = TRUE)),
+                                                                                  column(4, checkboxInput("show_lof", "Local Outlier Factor", value = TRUE))
+                                                                                ),
+                                                                                fluidRow(
+                                                                                  column(4, checkboxInput("show_svm", "One-Class SVM", value = TRUE)),
+                                                                                  column(4, checkboxInput("show_rf", "Random Forest Residuals", value = TRUE)),
+                                                                                  column(4, checkboxInput("show_iforest", "Isolation Forest", value = TRUE))
+                                                                                )
                                                                          )
                                                                        )
                                                                    )
                                                           ),
-                                                          tabPanel("Mahalanobis Distance", br(), shinycssloaders::withSpinner(plotlyOutput("outlier_mahalanobis_plot", height = "500px"), type = 4, color = "#2C3E50"), br(), verbatimTextOutput("outlier_mahalanobis_stats")),
-                                                          tabPanel("Cook's Distance", br(), shinycssloaders::withSpinner(plotlyOutput("outlier_cooks_plot", height = "500px"), type = 4, color = "#2C3E50"), br(), verbatimTextOutput("outlier_cooks_stats")),
-                                                          tabPanel("Local Outlier Factor", br(), shinycssloaders::withSpinner(plotlyOutput("outlier_lof_plot", height = "500px"), type = 4, color = "#2C3E50"), br(), verbatimTextOutput("outlier_lof_stats")),
-                                                          tabPanel("One-Class SVM", br(), shinycssloaders::withSpinner(plotlyOutput("outlier_svm_plot", height = "500px"), type = 4, color = "#2C3E50"), br(), verbatimTextOutput("outlier_svm_stats")),
-                                                          tabPanel("Random Forest Residuals", br(), shinycssloaders::withSpinner(plotlyOutput("outlier_rf_plot", height = "500px"), type = 4, color = "#2C3E50"), br(), verbatimTextOutput("outlier_rf_stats")),
-                                                          tabPanel("Isolation Forest", br(), shinycssloaders::withSpinner(plotlyOutput("outlier_if_plot", height = "500px"), type = 4, color = "#2C3E50"), br(), verbatimTextOutput("outlier_if_stats"))
+                                                          tabPanel("Mahalanobis Distance", 
+                                                                   br(), 
+                                                                   shinycssloaders::withSpinner(plotlyOutput("outlier_mahalanobis_plot", height = "500px"), type = 4, color = "#2C3E50"), 
+                                                                   br(), hr(),
+                                                                   tags$div(class = "panel-group",
+                                                                            tags$div(class = "panel panel-default",
+                                                                                     tags$div(class = "panel-heading",
+                                                                                              tags$h4(class = "panel-title",
+                                                                                                      tags$a(`data-toggle` = "collapse", href = "#collapseMahalanobisStats", "Mahalanobis Distance Statistics",
+                                                                                                             style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                                                              )
+                                                                                     ),
+                                                                                     tags$div(id = "collapseMahalanobisStats", class = "panel-collapse collapse",
+                                                                                              tags$div(class = "panel-body", verbatimTextOutput("outlier_mahalanobis_stats"))
+                                                                                     )
+                                                                            )
+                                                                   )
+                                                          ),
+                                                          tabPanel("Cook's Distance", 
+                                                                   br(), 
+                                                                   shinycssloaders::withSpinner(plotlyOutput("outlier_cooks_plot", height = "500px"), type = 4, color = "#2C3E50"), 
+                                                                   br(), hr(),
+                                                                   tags$div(class = "panel-group",
+                                                                            tags$div(class = "panel panel-default",
+                                                                                     tags$div(class = "panel-heading",
+                                                                                              tags$h4(class = "panel-title",
+                                                                                                      tags$a(`data-toggle` = "collapse", href = "#collapseCooksStats", "Cook's Distance Statistics",
+                                                                                                             style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                                                              )
+                                                                                     ),
+                                                                                     tags$div(id = "collapseCooksStats", class = "panel-collapse collapse",
+                                                                                              tags$div(class = "panel-body", verbatimTextOutput("outlier_cooks_stats"))
+                                                                                     )
+                                                                            )
+                                                                   )
+                                                          ),
+                                                          tabPanel("Local Outlier Factor", 
+                                                                   br(), 
+                                                                   shinycssloaders::withSpinner(plotlyOutput("outlier_lof_plot", height = "500px"), type = 4, color = "#2C3E50"), 
+                                                                   br(), hr(),
+                                                                   tags$div(class = "panel-group",
+                                                                            tags$div(class = "panel panel-default",
+                                                                                     tags$div(class = "panel-heading",
+                                                                                              tags$h4(class = "panel-title",
+                                                                                                      tags$a(`data-toggle` = "collapse", href = "#collapseLOFStats", "Local Outlier Factor Statistics",
+                                                                                                             style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                                                              )
+                                                                                     ),
+                                                                                     tags$div(id = "collapseLOFStats", class = "panel-collapse collapse",
+                                                                                              tags$div(class = "panel-body", verbatimTextOutput("outlier_lof_stats"))
+                                                                                     )
+                                                                            )
+                                                                   )
+                                                          ),
+                                                          tabPanel("One-Class SVM", 
+                                                                   br(), 
+                                                                   shinycssloaders::withSpinner(plotlyOutput("outlier_svm_plot", height = "500px"), type = 4, color = "#2C3E50"), 
+                                                                   br(), hr(),
+                                                                   tags$div(class = "panel-group",
+                                                                            tags$div(class = "panel panel-default",
+                                                                                     tags$div(class = "panel-heading",
+                                                                                              tags$h4(class = "panel-title",
+                                                                                                      tags$a(`data-toggle` = "collapse", href = "#collapseSVMStats", "One-Class SVM Statistics",
+                                                                                                             style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                                                              )
+                                                                                     ),
+                                                                                     tags$div(id = "collapseSVMStats", class = "panel-collapse collapse",
+                                                                                              tags$div(class = "panel-body", verbatimTextOutput("outlier_svm_stats"))
+                                                                                     )
+                                                                            )
+                                                                   )
+                                                          ),
+                                                          tabPanel("Random Forest Residuals", 
+                                                                   br(), 
+                                                                   shinycssloaders::withSpinner(plotlyOutput("outlier_rf_plot", height = "500px"), type = 4, color = "#2C3E50"), 
+                                                                   br(), hr(),
+                                                                   tags$div(class = "panel-group",
+                                                                            tags$div(class = "panel panel-default",
+                                                                                     tags$div(class = "panel-heading",
+                                                                                              tags$h4(class = "panel-title",
+                                                                                                      tags$a(`data-toggle` = "collapse", href = "#collapseRFStats", "Random Forest Residuals Statistics",
+                                                                                                             style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                                                              )
+                                                                                     ),
+                                                                                     tags$div(id = "collapseRFStats", class = "panel-collapse collapse",
+                                                                                              tags$div(class = "panel-body", verbatimTextOutput("outlier_rf_stats"))
+                                                                                     )
+                                                                            )
+                                                                   )
+                                                          ),
+                                                          tabPanel("Isolation Forest", 
+                                                                   br(), 
+                                                                   shinycssloaders::withSpinner(plotlyOutput("outlier_if_plot", height = "500px"), type = 4, color = "#2C3E50"), 
+                                                                   br(), hr(),
+                                                                   tags$div(class = "panel-group",
+                                                                            tags$div(class = "panel panel-default",
+                                                                                     tags$div(class = "panel-heading",
+                                                                                              tags$h4(class = "panel-title",
+                                                                                                      tags$a(`data-toggle` = "collapse", href = "#collapseIFStats", "Isolation Forest Statistics",
+                                                                                                             style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                                                              )
+                                                                                     ),
+                                                                                     tags$div(id = "collapseIFStats", class = "panel-collapse collapse",
+                                                                                              tags$div(class = "panel-body", verbatimTextOutput("outlier_if_stats"))
+                                                                                     )
+                                                                            )
+                                                                   )
+                                                          )
                                                         )
                                                  )
                                                )
                                       )
-                          )  # Close tabsetPanel (processing_tabs)
-                   )  # Close column(9, id = "master_main_panel")
-                 )  # Close fluidRow
-             )  # Close div(id = "master_sidebar_wrapper")
-           )  # Close fluidPage
-  ),  # <-- THIS CLOSES THE DATA PROCESSING STRATEGY TAB - IMPORTANT!
+                          )
+                   )
+                 )
+             )
+           )
+  ),
   
   
   # ==========================================================================
   # ==========================================================================
-  # TAB 3: DATA PROCESSING CONTROLS (Pipeline Builder) - TOP LEVEL
+  # TAB 4: DATA PROCESSING CONTROLS (Pipeline Builder)
   # ==========================================================================
   # ==========================================================================
   
@@ -1624,426 +1952,566 @@ ui <- navbarPage(
                column(12,
                       div(class = "alert alert-info",
                           icon("info-circle"),
-                          "Choose between two approaches: Build a step-by-step reproducible recipe, or use quick batch transformations."
+                          "Build a step-by-step reproducible recipe for data processing."
                       )
                )
              ),
              
-             tabsetPanel(
-               id = "processing_approach",
-               type = "tabs",
-               
-               # ================================================================
-               # SUB-TAB 1: RECIPE BUILDER (Step-by-step)
-               # ================================================================
-               tabPanel("Recipe Builder",
-                        br(),
-                        fluidRow(
-                          column(6,
-                                 div(class = "control-card",
-                                     h4("Step-by-Step Recipe Builder", style = "color: #2C3E50;"),
-                                     p("Build a reproducible sequence of processing steps. Each step is applied in order.", 
-                                       style = "font-size: 12px; color: #666;"),
-                                     hr(),
-                                     
-                                     # Dynamic step panels
-                                     uiOutput("processing_steps_ui"),
-                                     
-                                     # Add step button
-                                     actionButton("add_processing_step", "＋ Add Step", 
-                                                  class = "btn-primary btn-sm", style = "width: 100%; margin-bottom: 15px;"),
-                                     
-                                     hr(),
-                                     
-                                     h4("Recipe Controls"),
-                                     fluidRow(
-                                       column(8,
-                                              textInput("pipeline_name", "Recipe Name", 
-                                                        placeholder = "e.g., Cleaned_Data_v1")
-                                       ),
-                                       column(4,
-                                              br(),
-                                              actionButton("save_pipeline_btn", "Save Recipe", 
-                                                           class = "btn-info btn-sm", style = "width: 100%;")
-                                       )
-                                     ),
-                                     
-                                     fluidRow(
-                                       column(6,
-                                              actionButton("process_data_btn", "▶ Apply Recipe", 
-                                                           class = "btn-success", style = "width: 100%; margin-bottom: 10px;")
-                                       ),
-                                       column(6,
-                                              actionButton("reset_pipeline_btn", "Reset Recipe", 
-                                                           class = "btn-danger", style = "width: 100%; margin-bottom: 10px;")
-                                       )
-                                     ),
-                                     
-                                     hr(),
-                                     
-                                     h4("Saved Recipes", style = "color: #2C3E50; margin-top: 10px;"),
-                                     uiOutput("saved_pipelines_list")
-                                 )
+             # Recipe Builder only (no Quick Batch Actions tab)
+             fluidRow(
+               column(6,
+                      div(class = "control-card",
+                          h4("Step-by-Step Recipe Builder", style = "color: #2C3E50;"),
+                          p("Build a reproducible sequence of processing steps. Each step is applied in order.", 
+                            style = "font-size: 12px; color: #666;"),
+                          hr(),
+                          
+                          # Dynamic step panels
+                          uiOutput("processing_steps_ui"),
+                          
+                          # Add step button
+                          actionButton("add_processing_step", "＋ Add Step", 
+                                       class = "btn-primary btn-sm", style = "width: 100%; margin-bottom: 15px;"),
+                          
+                          hr(),
+                          
+                          h4("Recipe Controls"),
+                          fluidRow(
+                            column(6,
+                                   textInput("pipeline_name", "Recipe Name", 
+                                             placeholder = "e.g., Cleaned_Data_v1"),
+                                   textAreaInput("pipeline_comments", "Comments (optional)",
+                                                 placeholder = "Describe what this recipe does...",
+                                                 rows = 2),
+                                   actionButton("save_pipeline_btn", "Save Recipe", 
+                                                class = "btn-info btn-sm", style = "width: 100%; margin-top: 10px;")
+                            ),
+                            column(6,
+                                   actionButton("save_as_pipeline_btn", "Save As New Recipe", 
+                                                class = "btn-success btn-sm", style = "width: 100%; margin-top: 10px;"),
+                                   br(),
+                                   actionButton("clear_pipeline_btn", "Clear All Steps", 
+                                                class = "btn-warning btn-sm", style = "width: 100%; margin-top: 10px;")
+                            )
                           ),
                           
-                          column(6,
-                                 div(class = "control-card",
-                                     h4("Recipe Preview & Summary", style = "color: #2C3E50;"),
-                                     hr(),
-                                     h5("Current Recipe Steps:"),
-                                     uiOutput("pipeline_summary_ui"),
-                                     hr(),
-                                     h5("Apply Recipe to View Results:"),
-                                     p("Click 'Apply Recipe' above to process your data with these steps.",
-                                       style = "font-size: 12px; color: #666; font-style: italic;")
-                                 )
-                          )
-                        ),
-                        
-                        hr(),
-                        
-                        fluidRow(
-                          column(12,
-                                 div(class = "control-card",
-                                     h4("Processing Log & Data Summary"),
-                                     hr(),
-                                     verbatimTextOutput("proc_log"),
-                                     hr(),
-                                     verbatimTextOutput("proc_data_summary"),
-                                     hr(),
-                                     h5("Data Preview (First 20 rows):"),
-                                     DTOutput("proc_data_preview"),
-                                     hr(),
-                                     downloadButton("proc_download_data", "Download Processed Data (CSV)",
-                                                    class = "btn-success", style = "width: 100%;")
-                                 )
-                          )
-                        )
+                          fluidRow(
+                            column(6,
+                                   actionButton("process_data_btn", "▶ Apply Recipe", 
+                                                class = "btn-success", style = "width: 100%; margin-bottom: 10px;")
+                            ),
+                            column(6,
+                                   actionButton("reset_pipeline_btn", "Reset Recipe", 
+                                                class = "btn-danger", style = "width: 100%; margin-bottom: 10px;")
+                            )
+                          ),
+                          
+                          hr(),
+                          
+                          # Apply Loaded Recipe button
+                          actionButton("apply_loaded_recipe_btn", "Apply Loaded Recipe", 
+                                       class = "btn-success btn-sm", style = "width: 100%; margin-bottom: 10px;"),
+                          
+                          h4("Saved Recipes", style = "color: #2C3E50; margin-top: 10px;"),
+                          uiOutput("saved_pipelines_list")
+                      )
                ),
                
-               # ================================================================
-               # SUB-TAB 2: BATCH PROCESSOR (Quick transformations)
-               # ================================================================
-               tabPanel("Batch Processor",
-                        br(),
-                        fluidRow(
-                          column(6,
-                                 div(class = "control-card",
-                                     h4("Missing Value Imputation", style = "color: #2C3E50;"),
-                                     hr(),
-                                     selectInput("proc_impute_column", "Select numeric column:", 
-                                                 choices = numeric_cols, selected = NULL),
-                                     selectInput("proc_impute_method", "Imputation method:", 
-                                                 choices = c("Median" = "median", "Mean" = "mean", "Constant" = "constant"), 
-                                                 selected = "median"),
-                                     conditionalPanel(
-                                       condition = "input.proc_impute_method == 'constant'",
-                                       numericInput("proc_impute_value", "Constant value:", value = 0)
-                                     ),
-                                     actionButton("proc_impute_btn", "Apply Numeric Imputation",
-                                                  class = "btn-success btn-sm", style = "width: 100%; margin-bottom: 15px;"),
-                                     
-                                     selectInput("proc_impute_cat_column", "Select categorical column:", 
-                                                 choices = categorical_cols[categorical_cols != "CODE"], selected = NULL),
-                                     selectInput("proc_impute_cat_method", "Imputation method:", 
-                                                 choices = c("Mode" = "mode", "New Category 'Missing'" = "new_category", "Constant" = "constant"), 
-                                                 selected = "mode"),
-                                     conditionalPanel(
-                                       condition = "input.proc_impute_cat_method == 'constant'",
-                                       textInput("proc_impute_cat_value", "Constant value:", value = "Missing")
-                                     ),
-                                     actionButton("proc_impute_cat_btn", "Apply Categorical Imputation",
-                                                  class = "btn-info btn-sm", style = "width: 100%; margin-bottom: 15px;")
-                                 )
-                          ),
-                          
-                          column(6,
-                                 div(class = "control-card",
-                                     h4("Transformations", style = "color: #2C3E50;"),
-                                     hr(),
-                                     selectInput("proc_transform_column", "Select numeric column:", 
-                                                 choices = numeric_cols, selected = NULL),
-                                     selectInput("proc_transform_method", "Transformation method:", 
-                                                 choices = c("Log (ln)" = "log", "Square Root" = "sqrt", "Square" = "square",
-                                                             "Box-Cox" = "boxcox", "Yeo-Johnson" = "yeojohnson"),
-                                                 selected = "log"),
-                                     actionButton("proc_transform_btn", "Apply Transformation",
-                                                  class = "btn-primary btn-sm", style = "width: 100%; margin-bottom: 15px;")
-                                 )
-                          )
-                        ),
-                        
-                        fluidRow(
-                          column(6,
-                                 div(class = "control-card",
-                                     h4("Row/Column Operations", style = "color: #2C3E50;"),
-                                     hr(),
-                                     sliderInput("proc_max_missing_per_row", "Max missing values per row:",
-                                                 min = 0, max = 15, value = 5, step = 1),
-                                     actionButton("proc_remove_rows_btn", "Remove Rows Exceeding Threshold",
-                                                  class = "btn-warning btn-sm", style = "width: 100%; margin-bottom: 15px;"),
-                                     
-                                     selectInput("proc_remove_column", "Select column to remove:",
-                                                 choices = names(df), selected = NULL),
-                                     actionButton("proc_remove_col_btn", "Remove Selected Column",
-                                                  class = "btn-danger btn-sm", style = "width: 100%; margin-bottom: 15px;")
-                                 )
-                          ),
-                          
-                          column(6,
-                                 div(class = "control-card",
-                                     h4("Batch Actions", style = "color: #2C3E50;"),
-                                     hr(),
-                                     actionButton("proc_apply_all", "Apply All Quick Actions",
-                                                  class = "btn-primary btn-lg", style = "width: 100%; margin-bottom: 10px;"),
-                                     actionButton("proc_reset_all", "Reset to Original Data",
-                                                  class = "btn-danger btn-lg", style = "width: 100%;"),
-                                     hr(),
-                                     h4("Save Processed Dataset", style = "color: #2C3E50;"),
-                                     textInput("dataset_name", "Dataset Name", 
-                                               placeholder = "e.g., Log_Transformed_Data"),
-                                     actionButton("save_dataset_btn", "Save Current Dataset", 
-                                                  class = "btn-success", style = "width: 100%; margin-bottom: 15px;"),
-                                     hr(),
-                                     h4("Saved Datasets", style = "color: #2C3E50;"),
-                                     uiOutput("saved_datasets_list")
-                                 )
-                          )
-                        ),
-                        
-                        hr(),
-                        
-                        fluidRow(
-                          column(12,
-                                 div(class = "control-card",
-                                     h4("Processing Log & Data Summary"),
-                                     hr(),
-                                     verbatimTextOutput("proc_log_batch"),
-                                     hr(),
-                                     verbatimTextOutput("proc_data_summary_batch"),
-                                     hr(),
-                                     h5("Data Preview (First 20 rows):"),
-                                     DTOutput("proc_data_preview_batch")
-                                 )
-                          )
-                        )
+               column(6,
+                      div(class = "control-card",
+                          h4("Recipe Preview & Summary", style = "color: #2C3E50;"),
+                          hr(),
+                          h5("Current Recipe Steps:"),
+                          uiOutput("pipeline_summary_ui"),
+                          hr(),
+                          h5("Current Data Summary:"),
+                          verbatimTextOutput("proc_data_summary_recipe"),
+                          hr(),
+                          h5("Data Preview (First 20 rows):"),
+                          DTOutput("proc_data_preview_recipe"),
+                          hr(),
+                          downloadButton("proc_download_data_recipe", "Download Processed Data (CSV)",
+                                         class = "btn-success", style = "width: 100%;")
+                      )
+               )
+             ),
+             
+             hr(),
+             
+             fluidRow(
+               column(12,
+                      div(class = "control-card",
+                          h4("Processing Log"),
+                          hr(),
+                          verbatimTextOutput("proc_log_recipe")
+                      )
                )
              )
            )
-  ),
+  ),  
   
   
   # ==========================================================================
-  # ==========================================================================
-  # TAB 4: GLMNET MODELING - TOP LEVEL
-  # ==========================================================================
+  # TAB 5: GLMNET MODELING
   # ==========================================================================
   
   tabPanel("GLMNET Modeling",
            fluidPage(
-             h2("GLMNET Model for Death Rate Prediction"),
-             hr(),
-             
              fluidRow(
-               column(3,
-                      div(class = "well",
-                          h4("Data Source"),
-                          hr(),
-                          radioButtons("model_data_source", "Select Data Source:", 
-                                       choices = c("Original Data" = "original", "Saved Dataset" = "saved"),
-                                       selected = "original"),
-                          
-                          conditionalPanel(condition = "input.model_data_source == 'saved'",
-                                           div(style = "color: #17a2b8; background-color: #d1ecf1; padding: 8px; border-radius: 4px; margin-bottom: 15px;",
-                                               icon("database"), HTML("<strong>Using saved dataset</strong><br>Select a dataset saved from the Data Processing tab.")
-                                           ),
-                                           pickerInput("model_dataset_select", "Select Saved Dataset:", choices = NULL, options = list(`live-search` = TRUE)),
-                                           hr()
-                          ),
-                          
-                          conditionalPanel(condition = "input.model_data_source == 'processed'",
-                                           div(style = "color: #28a745; background-color: #d4edda; padding: 8px; border-radius: 4px; margin-bottom: 15px;",
-                                               icon("check-circle"), HTML("<strong>Using current processed data</strong><br>From the Data Processing tab.")
-                                           ),
-                                           actionButton("refresh_model_data", "Refresh Processed Data", class = "btn-info btn-sm", style = "width: 100%; margin-bottom: 15px;")
-                          ),
-                          
-                          hr(),
-                          h4("Model Settings"),
-                          hr(),
-                          selectInput("glmnet_alpha", "Alpha (Elastic Net Mix):", 
-                                      choices = c("Ridge (0)" = 0, "Elastic Net (0.5)" = 0.5, "Lasso (1)" = 1), 
-                                      selected = 0.5),
-                          numericInput("glmnet_lambda", "Lambda:", value = NULL, min = 0.001, max = 1, step = 0.001),
-                          hr(),
-                          numericInput("cv_folds", "CV Folds:", value = 5, min = 3, max = 10),
-                          numericInput("cv_seed", "Random Seed:", value = 123),
-                          hr(),
-                          actionButton("train_model", "Train GLMNET Model", class = "btn-primary", style = "width: 100%;")
-                      )
-               ),
-               
-               column(9,
-                      tabsetPanel(
-                        tabPanel("Model Summary", 
-                                 verbatimTextOutput("model_performance"), 
-                                 hr(), 
-                                 verbatimTextOutput("model_hyperparameters"), 
-                                 hr(), 
-                                 DTOutput("model_coefficients")
-                        ),
-                        tabPanel("Coefficient Plot", 
-                                 plotlyOutput("coef_plot", height = "500px")
-                        ),
-                        tabPanel("Predictions", 
-                                 plotlyOutput("predictions_plot", height = "500px"), 
-                                 hr(),
-                                 # Collapsible Predictions Summary
-                                 tags$div(
-                                   class = "panel-group",
-                                   tags$div(
-                                     class = "panel panel-default",
-                                     tags$div(
-                                       class = "panel-heading",
-                                       tags$h4(
-                                         class = "panel-title",
-                                         tags$a(`data-toggle` = "collapse", href = "#collapsePredictionsSummary", 
-                                                "Predictions Summary",
-                                                style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
-                                       )
-                                     ),
-                                     tags$div(
-                                       id = "collapsePredictionsSummary",
-                                       class = "panel-collapse collapse",
-                                       tags$div(
-                                         class = "panel-body",
-                                         verbatimTextOutput("predictions_summary")
-                                       )
-                                     )
-                                   )
-                                 )
-                        ),
-                        tabPanel("Residual Analysis", 
-                                 # IQR Multiplier control above the plot
-                                 div(class = "well", style = "padding: 10px; margin-bottom: 15px;",
-                                     h5("Residual Outlier Detection Settings", style = "margin-top: 0;"),
-                                     sliderInput("residual_iqr", "IQR Multiplier for Outlier Detection:", 
-                                                 min = 1, max = 5, value = 1.5, step = 0.1)
-                                 ),
-                                 plotlyOutput("residual_plot", height = "500px"), 
-                                 hr(),
-                                 # Collapsible Residual Statistics
-                                 tags$div(
-                                   class = "panel-group",
-                                   tags$div(
-                                     class = "panel panel-default",
-                                     tags$div(
-                                       class = "panel-heading",
-                                       tags$h4(
-                                         class = "panel-title",
-                                         tags$a(`data-toggle` = "collapse", href = "#collapseResidualStats", 
-                                                "Residual Statistics",
-                                                style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
-                                       )
-                                     ),
-                                     tags$div(
-                                       id = "collapseResidualStats",
-                                       class = "panel-collapse collapse",
-                                       tags$div(
-                                         class = "panel-body",
-                                         verbatimTextOutput("residual_stats")
-                                       )
-                                     )
-                                   )
-                                 ),
-                                 hr(),
-                                 # Collapsible Residual Outliers Table
-                                 tags$div(
-                                   class = "panel-group",
-                                   tags$div(
-                                     class = "panel panel-default",
-                                     tags$div(
-                                       class = "panel-heading",
-                                       tags$h4(
-                                         class = "panel-title",
-                                         tags$a(`data-toggle` = "collapse", href = "#collapseResidualOutliers", 
-                                                "Residual Outliers (Test Set)",
-                                                style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
-                                       )
-                                     ),
-                                     tags$div(
-                                       id = "collapseResidualOutliers",
-                                       class = "panel-collapse collapse",
-                                       tags$div(
-                                         class = "panel-body",
-                                         DTOutput("residual_outliers")
-                                       )
-                                     )
-                                   )
-                                 )
-                        ),
-                        tabPanel("Cross-Validation", 
-                                 plotlyOutput("cv_plot", height = "500px"), 
-                                 hr(),
-                                 # Collapsible CV Summary
-                                 tags$div(
-                                   class = "panel-group",
-                                   tags$div(
-                                     class = "panel panel-default",
-                                     tags$div(
-                                       class = "panel-heading",
-                                       tags$h4(
-                                         class = "panel-title",
-                                         tags$a(`data-toggle` = "collapse", href = "#collapseCVSummary", 
-                                                "Cross-Validation Summary",
-                                                style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
-                                       )
-                                     ),
-                                     tags$div(
-                                       id = "collapseCVSummary",
-                                       class = "panel-collapse collapse",
-                                       tags$div(
-                                         class = "panel-body",
-                                         verbatimTextOutput("cv_summary")
-                                       )
-                                     )
-                                   )
-                                 )
-                        )
+               column(12,
+                      actionButton("toggle_model_sidebar", 
+                                   HTML('<i class="fa fa-sliders-h"></i> Hide Settings Panel'),
+                                   class = "btn-primary btn-sm",
+                                   style = "margin-bottom: 10px; background-color: #2C3E50; border-color: #2C3E50; width: auto;"
                       )
                )
-             )
-           )
-  ),  # Close tabPanel "GLMNET Modeling"
-  
-  
-  # ==========================================================================
-  # ==========================================================================
-  # TAB 5: REPORT SUMMARY - TOP LEVEL
-  # ==========================================================================
-  # ==========================================================================
-  
-  tabPanel("Report Summary",
-           fluidPage(
-             h2("Analysis Report Summary"),
-             hr(),
+             ),
              
              fluidRow(
-               column(6, div(class = "well", h4("Data Description"), hr(), textOutput("report_data_desc"))),
-               column(6, div(class = "well", h4("Missingness Strategy"), hr(), textOutput("report_missing_strategy")))
-             ),
-             fluidRow(
-               column(6, div(class = "well", h4("Outlier Strategy"), hr(), textOutput("report_outlier_strategy"))),
-               column(6, div(class = "well", h4("Pre-processing Strategy"), hr(), textOutput("report_preprocess_strategy")))
-             ),
-             fluidRow(
-               column(6, div(class = "well", h4("GLMNET Explanation"), hr(), textOutput("report_glmnet_explanation"))),
-               column(6, div(class = "well", h4("Model Performance"), hr(), textOutput("report_model_performance")))
-             ),
-             fluidRow(
-               column(12, div(class = "well", h4("Residual Analysis Summary"), hr(), textOutput("report_residual_summary")))
-             )
-           )
-  )  # Close tabPanel "Report Summary"
+               # Sidebar column - with ID that matches server hide/show
+               div(id = "model_sidebar_panel", class = "col-sm-3",
+                   div(class = "well",
+                       # Data Source Section - Collapsible
+                       div(class = "collapsible-section",
+                           div(class = "collapsible-header", 
+                               onclick = "Shiny.setInputValue('collapse_data_source', Math.random())",
+                               icon("database"), " Data Source",
+                               span(class = "collapsible-icon", icon("chevron-down"))),
+                           div(id = "collapse_data_source_content", class = "collapsible-content",
+                               style = "display: block;",
+                               radioButtons("model_data_source", NULL, 
+                                            choices = c("Original Data" = "original", "Saved Dataset" = "saved"),
+                                            selected = "original"),
+                               
+                               conditionalPanel(condition = "input.model_data_source == 'saved'",
+                                                div(style = "color: #17a2b8; background-color: #d1ecf1; padding: 8px; border-radius: 4px; margin-bottom: 15px;",
+                                                    icon("database"), HTML("<strong>Using saved dataset</strong><br>Select a dataset saved from the Data Processing tab.")
+                                                ),
+                                                pickerInput("model_dataset_select", "Select Saved Dataset:", choices = NULL, options = list(`live-search` = TRUE))
+                               ),
+                               
+                               conditionalPanel(condition = "input.model_data_source == 'processed'",
+                                                div(style = "color: #28a745; background-color: #d4edda; padding: 8px; border-radius: 4px; margin-bottom: 15px;",
+                                                    icon("check-circle"), HTML("<strong>Using current processed data</strong><br>From the Data Processing tab.")
+                                                ),
+                                                actionButton("refresh_model_data", "Refresh Processed Data", class = "btn-info btn-sm", style = "width: 100%;")
+                               )
+                           )
+                       ),
+                       
+                       hr(),
+                       
+                       # Model Settings Section - Collapsible
+                       div(class = "collapsible-section",
+                           div(class = "collapsible-header", 
+                               onclick = "Shiny.setInputValue('collapse_model_settings', Math.random())",
+                               icon("sliders-h"), " Model Settings",
+                               span(class = "collapsible-icon", icon("chevron-down"))),
+                           div(id = "collapse_model_settings_content", class = "collapsible-content",
+                               style = "display: block;",
+                               div(
+                                 tags$label("Alpha (Elastic Net Mix):", `for` = "glmnet_alpha_slider", style = "font-weight: bold;"),
+                                 tags$input(id = "glmnet_alpha_slider", type = "range", 
+                                            min = 0, max = 1, step = 0.05, value = 0.5,
+                                            style = "width: 100%; margin-top: 10px;"),
+                                 tags$input(id = "glmnet_alpha", type = "hidden", value = 0.5),
+                                 
+                                 tags$div(style = "display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px;",
+                                          tags$span("0", style = "font-size: 11px; color: #2C3E50; font-weight: bold;"),
+                                          tags$span("0.2", style = "font-size: 11px; color: #666;"),
+                                          tags$span("0.4", style = "font-size: 11px; color: #666;"),
+                                          tags$span("0.6", style = "font-size: 11px; color: #666;"),
+                                          tags$span("0.8", style = "font-size: 11px; color: #666;"),
+                                          tags$span("1", style = "font-size: 11px; color: #2C3E50; font-weight: bold;")
+                                 ),
+                                 p(class = "help-block", "0 = Ridge | 0.1-0.9 = Elastic Net | 1 = Lasso", 
+                                   style = "font-size: 11px; color: #666; margin-top: 5px; margin-bottom: 10px;")
+                               ),
+                               div(
+                                 numericInput("glmnet_lambda", "Lambda (Regularization):", 
+                                              value = 0.01, min = 0.001, max = 1, step = 0.001),
+                                 p(class = "help-block", "Leave empty for CV-optimized lambda", 
+                                   style = "font-size: 11px; color: #666; margin-top: -10px; margin-bottom: 10px;")
+                               ),
+                               numericInput("cv_folds", "CV Folds:", value = 5, min = 3, max = 10),
+                               numericInput("cv_seed", "Random Seed:", value = 123)
+                           )
+                       ),
+                       
+                       hr(),
+                       
+                       actionButton("train_model", "Train GLMNET Model", class = "btn-primary", style = "width: 100%;")
+                   )
+               ),
+               
+               # Main content column
+               div(id = "model_main_content_wrapper", class = "main-content-wrapper",
+                   column(9,
+                          mainPanel(width = 12,
+                                    tabsetPanel(
+                                      tabPanel("Model Summary", 
+                                               verbatimTextOutput("model_performance"), 
+                                               hr(), 
+                                               verbatimTextOutput("model_hyperparameters"), 
+                                               hr(), 
+                                               DTOutput("model_coefficients")
+                                      ),
+                                      tabPanel("Coefficient Plot", 
+                                               plotlyOutput("coef_plot", height = "500px")
+                                      ),
+                                      tabPanel("Predictions", 
+                                               fluidRow(
+                                                 column(3,
+                                                        div(class = "well",
+                                                            h4("Display Controls"),
+                                                            hr(),
+                                                            radioButtons("predictions_dataset", "Dataset to Display:",
+                                                                         choices = c("Train Only" = "train", "Test Only" = "test", "Both (Train + Test)" = "both"),
+                                                                         selected = "both"),
+                                                            hr(),
+                                                            p("Points represent individual observations.", style = "font-size: 11px; color: #666;"),
+                                                            p("The dashed line shows perfect prediction (Actual = Predicted).", style = "font-size: 11px; color: #666;")
+                                                        )
+                                                 ),
+                                                 column(9,
+                                                        plotlyOutput("predictions_plot", height = "500px"), 
+                                                        hr(),
+                                                        tags$div(
+                                                          class = "panel-group",
+                                                          tags$div(
+                                                            class = "panel panel-default",
+                                                            tags$div(
+                                                              class = "panel-heading",
+                                                              tags$h4(
+                                                                class = "panel-title",
+                                                                tags$a(`data-toggle` = "collapse", href = "#collapsePredictionsSummary", 
+                                                                       "Predictions Summary",
+                                                                       style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                              )
+                                                            ),
+                                                            tags$div(
+                                                              id = "collapsePredictionsSummary",
+                                                              class = "panel-collapse collapse",
+                                                              tags$div(
+                                                                class = "panel-body",
+                                                                verbatimTextOutput("predictions_summary")
+                                                              )
+                                                            )
+                                                          )
+                                                        )
+                                                 )
+                                               )
+                                      ),
+                                      tabPanel("Residual Analysis",
+                                               fluidRow(
+                                                 column(3,
+                                                        div(class = "well",
+                                                            h4("Display Controls"),
+                                                            hr(),
+                                                            radioButtons("residual_display_dataset", "Dataset to Display:",
+                                                                         choices = c("Train Only" = "train", "Test Only" = "test", "Both (Train + Test)" = "both"),
+                                                                         selected = "both"),
+                                                            hr(),
+                                                            div(
+                                                              tags$label("IQR Multiplier for Outlier Detection:", `for` = "residual_iqr_slider", style = "font-weight: bold;"),
+                                                              tags$input(id = "residual_iqr_slider", type = "range",
+                                                                         min = 1, max = 5, step = 0.1, value = 1.5,
+                                                                         style = "width: 100%; margin-top: 10px;"),
+                                                              tags$div(style = "display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px;",
+                                                                       tags$span("1", style = "font-size: 11px; color: #2C3E50; font-weight: bold;"),
+                                                                       tags$span("2", style = "font-size: 11px; color: #666;"),
+                                                                       tags$span("3", style = "font-size: 11px; color: #2C3E50; font-weight: bold;"),
+                                                                       tags$span("4", style = "font-size: 11px; color: #666;"),
+                                                                       tags$span("5", style = "font-size: 11px; color: #2C3E50; font-weight: bold;")
+                                                              ),
+                                                              p(class = "help-block", "Standard IQR multiplier is 1.5. Higher values = fewer outliers detected.",
+                                                                style = "font-size: 11px; color: #666; margin-top: 5px;")
+                                                            )
+                                                        )
+                                                 ),  # <-- comma here, column(3) closed
+                                                 column(9,  # <-- column(9) now inside fluidRow
+                                                        plotlyOutput("residual_plot", height = "500px"),
+                                                        hr(),
+                                                        tags$div(
+                                                          class = "panel-group",
+                                                          tags$div(
+                                                            class = "panel panel-default",
+                                                            tags$div(
+                                                              class = "panel-heading",
+                                                              tags$h4(
+                                                                class = "panel-title",
+                                                                tags$a(`data-toggle` = "collapse", href = "#collapseResidualStats",
+                                                                       "Residual Statistics",
+                                                                       style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                              )
+                                                            ),
+                                                            tags$div(
+                                                              id = "collapseResidualStats",
+                                                              class = "panel-collapse collapse",
+                                                              tags$div(
+                                                                class = "panel-body",
+                                                                verbatimTextOutput("residual_stats")
+                                                              )
+                                                            )
+                                                          )
+                                                        ),
+                                                        hr(),
+                                                        tags$div(
+                                                          class = "panel-group",
+                                                          tags$div(
+                                                            class = "panel panel-default",
+                                                            tags$div(
+                                                              class = "panel-heading",
+                                                              tags$h4(
+                                                                class = "panel-title",
+                                                                tags$a(`data-toggle` = "collapse", href = "#collapseResidualOutliers",
+                                                                       "Residual Outliers (Test Set)",
+                                                                       style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                              )
+                                                            ),
+                                                            tags$div(
+                                                              id = "collapseResidualOutliers",
+                                                              class = "panel-collapse collapse in",
+                                                              tags$div(
+                                                                class = "panel-body",
+                                                                DTOutput("residual_outliers")
+                                                              )
+                                                            )
+                                                          )
+                                                        )
+                                                 )  
+                                               )    
+                                      ),          
+                                      tabPanel("Residual Boxplot",
+                                               fluidRow(
+                                                 column(3,
+                                                        div(class = "well",
+                                                            h4("Residual Analysis Controls"),
+                                                            hr(),
+                                                            radioButtons("residual_dataset", "Dataset to Display:",
+                                                                         choices = c("Train Only" = "train", "Test Only" = "test", "Both (Train + Test)" = "both"),
+                                                                         selected = "both"),
+                                                            hr(),
+                                                            div(
+                                                              tags$label("IQR Multiplier for Outlier Detection:", `for` = "residual_boxplot_iqr_slider", style = "font-weight: bold;"),
+                                                              tags$input(id = "residual_boxplot_iqr_slider", type = "range", 
+                                                                         min = 1, max = 5, step = 0.1, value = 1.5,
+                                                                         style = "width: 100%; margin-top: 10px;"),
+                                                              tags$div(style = "display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px;",
+                                                                       tags$span("1", style = "font-size: 11px; color: #2C3E50; font-weight: bold;"),
+                                                                       tags$span("2", style = "font-size: 11px; color: #666;"),
+                                                                       tags$span("3", style = "font-size: 11px; color: #2C3E50; font-weight: bold;"),
+                                                                       tags$span("4", style = "font-size: 11px; color: #666;"),
+                                                                       tags$span("5", style = "font-size: 11px; color: #2C3E50; font-weight: bold;")
+                                                              ),
+                                                              p(class = "help-block", "Standard IQR multiplier is 1.5. Higher values = fewer outliers detected.", 
+                                                                style = "font-size: 11px; color: #666; margin-top: 5px;")
+                                                            ),
+                                                            hr(),
+                                                            p("Outliers are points beyond the whiskers (Q1 - IQR×multiplier, Q3 + IQR×multiplier).",
+                                                              style = "font-size: 11px; color: #666;"),
+                                                            p("Hover over points to see CODE and residual value.",
+                                                              style = "font-size: 11px; color: #666; margin-top: 5px;")
+                                                        )
+                                                 ),
+                                                 column(9,
+                                                        shinycssloaders::withSpinner(
+                                                          plotlyOutput("residual_boxplot", height = "500px"),
+                                                          type = 4, color = "#2C3E50", size = 0.7
+                                                        ),
+                                                        br(),
+                                                        hr(),
+                                                        tags$div(
+                                                          class = "panel-group",
+                                                          tags$div(
+                                                            class = "panel panel-default",
+                                                            tags$div(
+                                                              class = "panel-heading",
+                                                              tags$h4(
+                                                                class = "panel-title",
+                                                                tags$a(`data-toggle` = "collapse", href = "#collapseResidualBoxplotStats", 
+                                                                       "Residual Boxplot Statistics",
+                                                                       style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                              )
+                                                            ),
+                                                            tags$div(
+                                                              id = "collapseResidualBoxplotStats",
+                                                              class = "panel-collapse collapse",
+                                                              tags$div(
+                                                                class = "panel-body",
+                                                                verbatimTextOutput("residual_boxplot_stats")
+                                                              )
+                                                            )
+                                                          )
+                                                        ),
+                                                        hr(),
+                                                        tags$div(
+                                                          class = "panel-group",
+                                                          tags$div(
+                                                            class = "panel panel-default",
+                                                            tags$div(
+                                                              class = "panel-heading",
+                                                              tags$h4(
+                                                                class = "panel-title",
+                                                                tags$a(`data-toggle` = "collapse", href = "#collapseResidualBoxplotOutliers", 
+                                                                       "Residual Outliers (by IQR method)",
+                                                                       style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                              )
+                                                            ),
+                                                            tags$div(
+                                                              id = "collapseResidualBoxplotOutliers",
+                                                              class = "panel-collapse collapse in",
+                                                              tags$div(
+                                                                class = "panel-body",
+                                                                DTOutput("residual_boxplot_outliers")
+                                                              )
+                                                            )
+                                                          )
+                                                        )
+                                                 )
+                                               )
+                                      ),
+                                      tabPanel("Cross-Validation", 
+                                               plotlyOutput("cv_plot", height = "500px"), 
+                                               hr(),
+                                               tags$div(
+                                                 class = "panel-group",
+                                                 tags$div(
+                                                   class = "panel panel-default",
+                                                   tags$div(
+                                                     class = "panel-heading",
+                                                     tags$h4(
+                                                       class = "panel-title",
+                                                       tags$a(`data-toggle` = "collapse", href = "#collapseCVSummary", 
+                                                              "Cross-Validation Summary",
+                                                              style = "cursor: pointer; text-decoration: none; color: #2C3E50;")
+                                                     )
+                                                   ),
+                                                   tags$div(
+                                                     id = "collapseCVSummary",
+                                                     class = "panel-collapse collapse",
+                                                     tags$div(
+                                                       class = "panel-body",
+                                                       verbatimTextOutput("cv_summary")
+                                                     )
+                                                   )
+                                                 )
+                                               )
+                                      ),
+                                      tabPanel("Hyperparameter Tuning",
+                                               fluidRow(
+                                                 column(4,
+                                                        div(class = "well",
+                                                            h4("Tuning Controls"),
+                                                            hr(),
+                                                            h5("Alpha (Elastic Net Mix) Grid"),
+                                                            sliderInput("tune_alpha_min", "Alpha Minimum:", 
+                                                                        min = 0, max = 1, value = 0, step = 0.1),
+                                                            sliderInput("tune_alpha_max", "Alpha Maximum:", 
+                                                                        min = 0, max = 1, value = 1, step = 0.1),
+                                                            numericInput("tune_alpha_steps", "Number of Alpha Values:", 
+                                                                         value = 11, min = 2, max = 21),
+                                                            
+                                                            hr(),
+                                                            
+                                                            h5("Lambda Grid"),
+                                                            numericInput("tune_lambda_min", "Lambda Minimum (log scale):", 
+                                                                         value = -6, min = -10, max = 0, step = 0.5),
+                                                            numericInput("tune_lambda_max", "Lambda Maximum (log scale):", 
+                                                                         value = 2, min = -5, max = 5, step = 0.5),
+                                                            numericInput("tune_lambda_steps", "Number of Lambda Values:", 
+                                                                         value = 50, min = 20, max = 100),
+                                                            
+                                                            hr(),
+                                                            
+                                                            h5("Cross-Validation Settings"),
+                                                            numericInput("tune_cv_folds", "Number of CV Folds:", 
+                                                                         value = 5, min = 3, max = 10),
+                                                            numericInput("tune_cv_seed", "Random Seed:", 
+                                                                         value = 123, min = 1, max = 9999),
+                                                            
+                                                            hr(),
+                                                            
+                                                            selectInput("tune_metric", "Optimization Metric:",
+                                                                        choices = c("RMSE" = "RMSE", "MAE" = "MAE", "R²" = "Rsquared"),
+                                                                        selected = "RMSE"),
+                                                            
+                                                            hr(),
+                                                            
+                                                            actionButton("run_tuning", "Run Hyperparameter Tuning", 
+                                                                         class = "btn-primary", style = "width: 100%; margin-bottom: 10px;"),
+                                                            
+                                                            conditionalPanel(
+                                                              condition = "output.tuning_complete == true",
+                                                              actionButton("use_tuned_params", "Use Tuned Parameters for Modeling", 
+                                                                           class = "btn-success", style = "width: 100%;")
+                                                            )
+                                                        )
+                                                 ),
+                                                 
+                                                 column(8,
+                                                        tabsetPanel(
+                                                          tabPanel("Tuning Results",
+                                                                   br(),
+                                                                   h4("Best Parameters Found"),
+                                                                   hr(),
+                                                                   fluidRow(
+                                                                     column(4, div(class = "well", 
+                                                                                   h5("Best Alpha", style = "text-align: center;"),
+                                                                                   h3(textOutput("best_alpha_display"), style = "text-align: center; color: #2C3E50;"))),
+                                                                     column(4, div(class = "well", 
+                                                                                   h5("Best Lambda", style = "text-align: center;"),
+                                                                                   h3(textOutput("best_lambda_display"), style = "text-align: center; color: #2C3E50;"))),
+                                                                     column(4, div(class = "well", 
+                                                                                   h5("Best Metric Value", style = "text-align: center;"),
+                                                                                   h3(textOutput("best_metric_display"), style = "text-align: center; color: #2C3E50;")))
+                                                                   ),
+                                                                   br(),
+                                                                   h5("Performance vs Alpha (at optimal lambda)"),
+                                                                   shinycssloaders::withSpinner(
+                                                                     plotlyOutput("tune_alpha_plot", height = "400px"),
+                                                                     type = 4, color = "#2C3E50", size = 0.7
+                                                                   ),
+                                                                   br(),
+                                                                   h5("Performance vs Lambda (at optimal alpha)"),
+                                                                   shinycssloaders::withSpinner(
+                                                                     plotlyOutput("tune_lambda_plot", height = "400px"),
+                                                                     type = 4, color = "#2C3E50", size = 0.7
+                                                                   )
+                                                          ),
+                                                          
+                                                          tabPanel("Heatmap",
+                                                                   br(),
+                                                                   h5("Hyperparameter Heatmap (Alpha vs Lambda)"),
+                                                                   p("Darker colors indicate better performance (lower RMSE/MAE or higher R²).",
+                                                                     style = "font-size: 11px; color: #666; margin-bottom: 15px;"),
+                                                                   shinycssloaders::withSpinner(
+                                                                     plotlyOutput("tune_heatmap", height = "600px"),
+                                                                     type = 4, color = "#2C3E50", size = 0.7
+                                                                   )
+                                                          ),
+                                                          
+                                                          tabPanel("CV Summary",
+                                                                   br(),
+                                                                   h5("Cross-Validation Summary"),
+                                                                   hr(),
+                                                                   verbatimTextOutput("tune_cv_summary"),
+                                                                   br(),
+                                                                   h5("Top Parameter Combinations"),
+                                                                   DTOutput("tune_top_results")
+                                                          )
+                                                        )
+                                                 )
+                                               )
+                                      )
+                                    ) 
+                          )  
+                   )  
+               )  
+             )  
+           )  
+  )  
   
-)  # Close navbarPage
+  
+  
+)  # Close navbarPage # server.R - COMPLETE VERSION

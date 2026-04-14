@@ -1,12 +1,15 @@
-# server.R - COMPLETE VERSION WITH ALL FUNCTIONALITY
-
 server <- function(input, output, session) {
   
-  # ============================================================================
-  # ============================================================================
+  # ========================================================================
+  # ========================================================================
   # SECTION 1: HELPER FUNCTIONS
-  # ============================================================================
-  # ============================================================================
+  # ========================================================================
+  # ========================================================================
+  
+  # Define NULL coalescing operator
+  `%||%` <- function(x, y) {
+    if (is.null(x)) y else x
+  }
   
   # Safe NULL handler for missing value checks
   safe_in <- function(value, vector) {
@@ -14,56 +17,9 @@ server <- function(input, output, session) {
     return(value %in% vector)
   }
   
-  # ----------------------------------------------------------------------------
-  # Missing Value Standardization
-  # ----------------------------------------------------------------------------
-  
-  standardize_missing <- function(data, treat_neg99 = TRUE, treat_dash = TRUE, treat_na_string = TRUE) {
-    result <- data
-    for(col in names(result)) {
-      vals <- as.character(result[[col]])
-      was_numeric <- col %in% numeric_cols
-      if(treat_neg99) vals[vals == "-99"] <- NA
-      if(treat_dash) vals[vals == "--"] <- NA
-      if(treat_na_string) vals[vals == "NA"] <- NA
-      if(was_numeric) {
-        result[[col]] <- suppressWarnings(as.numeric(vals))
-      } else {
-        result[[col]] <- vals
-      }
-    }
-    return(result)
-  }
-  
-  # ----------------------------------------------------------------------------
-  # Categorical Filter Application
-  # ----------------------------------------------------------------------------
-  
-  apply_categorical_filters <- function(data, cat_vars, filter_prefix, include_null) {
-    if(is.null(cat_vars) || length(cat_vars) == 0) return(data)
-    for(var in cat_vars) {
-      sel <- input[[paste0(filter_prefix, var)]]
-      if(!is.null(sel) && length(sel) > 0) {
-        if("NA" %in% sel) {
-          sel_real <- setdiff(sel, "NA")
-          if(include_null) {
-            data <- data[data[[var]] %in% sel_real | is.na(data[[var]]), ]
-          } else {
-            data <- data[data[[var]] %in% sel_real, ]
-          }
-        } else {
-          data <- data[data[[var]] %in% sel, ]
-          if(!include_null) data <- data[!is.na(data[[var]]), ]
-        }
-      }
-    }
-    return(data)
-  }
-  
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Center and Scale for Boxplot
-  # ----------------------------------------------------------------------------
-  
+  # -------------------------------------------------------------------------
   apply_center_scale <- function(data) {
     if(!input$boxplot_center && !input$boxplot_scale) return(data)
     
@@ -71,7 +27,7 @@ server <- function(input, output, session) {
       dplyr::group_by(variable) %>%
       dplyr::mutate(
         value = if(input$boxplot_center && input$boxplot_scale) {
-          scale(value)
+          as.numeric(scale(value))
         } else if(input$boxplot_center) {
           value - mean(value, na.rm = TRUE)
         } else if(input$boxplot_scale) {
@@ -83,10 +39,7 @@ server <- function(input, output, session) {
       dplyr::ungroup()
   }
   
-  # ----------------------------------------------------------------------------
-  # Outlier Flag Addition
-  # ----------------------------------------------------------------------------
-  
+  # Outlier Flag Addition for Boxplot
   add_outlier_flags <- function(data, iqr_multiplier) {
     if("group" %in% names(data)) {
       data %>% dplyr::group_by(variable, group) %>%
@@ -109,10 +62,29 @@ server <- function(input, output, session) {
     }
   }
   
+  # -------------------------------------------------------------------------
+  # Missing Value Standardization
+  # -------------------------------------------------------------------------
+  standardize_missing <- function(data, treat_neg99 = TRUE, treat_dash = TRUE, treat_na_string = TRUE) {
+    result <- data
+    for(col in names(result)) {
+      vals <- as.character(result[[col]])
+      was_numeric <- col %in% numeric_cols
+      if(treat_neg99) vals[vals == "-99"] <- NA
+      if(treat_dash) vals[vals == "--"] <- NA
+      if(treat_na_string) vals[vals == "NA"] <- NA
+      if(was_numeric) {
+        result[[col]] <- suppressWarnings(as.numeric(vals))
+      } else {
+        result[[col]] <- vals
+      }
+    }
+    return(result)
+  }
   
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Remove outliers using IQR method
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   remove_outliers_iqr <- function(data, vars, iqr_multiplier = 1.5) {
     result <- data
     outlier_rows <- rep(FALSE, nrow(data))
@@ -133,11 +105,10 @@ server <- function(input, output, session) {
     return(list(data = result, removed = removed))
   }
   
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Remove outliers using Mahalanobis distance
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   remove_outliers_mahalanobis <- function(data, threshold_prob = 0.999) {
-    # Get numeric columns only
     numeric_data <- data[, sapply(data, is.numeric), drop = FALSE]
     numeric_data <- numeric_data[, !names(numeric_data) %in% c("CODE", "OBS_TYPE"), drop = FALSE]
     
@@ -145,7 +116,6 @@ server <- function(input, output, session) {
       return(list(data = data, removed = 0, message = "Need at least 2 numeric variables"))
     }
     
-    # Remove rows with NA
     complete_idx <- complete.cases(numeric_data)
     if(sum(complete_idx) < 5) {
       return(list(data = data, removed = 0, message = "Insufficient complete cases"))
@@ -162,7 +132,6 @@ server <- function(input, output, session) {
     threshold <- qchisq(p = threshold_prob, df = df)
     outlier_rows_md <- md2 > threshold
     
-    # Map back to original data
     outlier_indices <- which(complete_idx)[outlier_rows_md]
     outlier_flag <- rep(FALSE, nrow(data))
     outlier_flag[outlier_indices] <- TRUE
@@ -173,15 +142,14 @@ server <- function(input, output, session) {
     return(list(data = result, removed = removed))
   }
   
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Remove outliers using Cook's Distance
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   remove_outliers_cooks <- function(data, method = "4mean") {
     if(!"DEATH_RATE" %in% names(data)) {
       return(list(data = data, removed = 0, message = "DEATH_RATE column required"))
     }
     
-    # Get predictors (all numeric except DEATH_RATE)
     predictor_vars <- names(data)[sapply(data, is.numeric)]
     predictor_vars <- predictor_vars[!predictor_vars %in% c("DEATH_RATE", "CODE", "OBS_TYPE")]
     
@@ -189,7 +157,6 @@ server <- function(input, output, session) {
       return(list(data = data, removed = 0, message = "Need at least 1 predictor variable"))
     }
     
-    # Prepare data
     model_data <- data[, c("DEATH_RATE", predictor_vars), drop = FALSE]
     complete_idx <- complete.cases(model_data)
     
@@ -222,11 +189,10 @@ server <- function(input, output, session) {
     return(list(data = result, removed = removed))
   }
   
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Remove outliers using Local Outlier Factor (LOF)
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   remove_outliers_lof <- function(data, minPts = 5, threshold = 2) {
-    # Get numeric columns
     numeric_data <- data[, sapply(data, is.numeric), drop = FALSE]
     numeric_data <- numeric_data[, !names(numeric_data) %in% c("CODE", "OBS_TYPE"), drop = FALSE]
     
@@ -259,11 +225,10 @@ server <- function(input, output, session) {
     return(list(data = result, removed = removed))
   }
   
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Remove outliers using Isolation Forest
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   remove_outliers_iforest <- function(data, threshold = 0.6) {
-    # Get numeric columns
     numeric_data <- data[, sapply(data, is.numeric), drop = FALSE]
     numeric_data <- numeric_data[, !names(numeric_data) %in% c("CODE", "OBS_TYPE"), drop = FALSE]
     
@@ -296,123 +261,42 @@ server <- function(input, output, session) {
     return(list(data = result, removed = removed))
   }
   
-  # ----------------------------------------------------------------------------
-  # Remove rows by index
-  # ----------------------------------------------------------------------------
-  remove_rows_by_index <- function(data, indices) {
-    if(is.null(indices) || length(indices) == 0) {
-      return(list(data = data, removed = 0))
-    }
-    indices <- as.numeric(indices)
-    indices <- indices[indices >= 1 & indices <= nrow(data)]
-    result <- data[-indices, , drop = FALSE]
-    return(list(data = result, removed = length(indices)))
-  }
-  
-  # ----------------------------------------------------------------------------
-  # Keep rows by index (select specific rows)
-  # ----------------------------------------------------------------------------
-  keep_rows_by_index <- function(data, indices) {
-    if(is.null(indices) || length(indices) == 0) {
-      return(list(data = data, removed = 0))
-    }
-    indices <- as.numeric(indices)
-    indices <- indices[indices >= 1 & indices <= nrow(data)]
-    result <- data[indices, , drop = FALSE]
-    return(list(data = result, removed = nrow(data) - length(indices)))
-  }
-  
-  # ----------------------------------------------------------------------------
-  # Remove columns by name
-  # ----------------------------------------------------------------------------
-  remove_cols_by_name <- function(data, cols) {
-    if(is.null(cols) || length(cols) == 0) {
-      return(list(data = data, removed = 0))
-    }
-    cols_to_remove <- cols[cols %in% names(data)]
-    result <- data[, !names(data) %in% cols_to_remove, drop = FALSE]
-    return(list(data = result, removed = length(cols_to_remove)))
-  }
-  
-  # ----------------------------------------------------------------------------
-  # Keep columns by name (select specific columns)
-  # ----------------------------------------------------------------------------
-  keep_cols_by_name <- function(data, cols) {
-    if(is.null(cols) || length(cols) == 0) {
-      return(list(data = data, removed = 0))
-    }
-    cols_to_keep <- cols[cols %in% names(data)]
-    # Always keep CODE and OBS_TYPE if they exist
-    always_keep <- c("CODE", "OBS_TYPE")
-    cols_to_keep <- unique(c(cols_to_keep, always_keep[always_keep %in% names(data)]))
-    result <- data[, cols_to_keep, drop = FALSE]
-    return(list(data = result, removed = ncol(data) - ncol(result)))
-  }
-  
-  
-  # ============================================================================
-  # Variable Selection Features
-  # ============================================================================
-  
+  # -------------------------------------------------------------------------
+  # Variable ordering
+  # -------------------------------------------------------------------------
   original_var_order <- c("CODE", "GOVERN_TYPE", "POPULATION", "AGE25_PROPTN", "AGE_MEDIAN", 
                           "AGE50_PROPTN", "POP_DENSITY", "GDP", "INFANT_MORT", "DOCS", 
                           "VAX_RATE", "HEALTHCARE_BASIS", "HEALTHCARE_COST", "DEATH_RATE", "OBS_TYPE")
   
+  numeric_cols <- c("POPULATION", "AGE25_PROPTN", "AGE_MEDIAN", "AGE50_PROPTN", 
+                    "POP_DENSITY", "GDP", "INFANT_MORT", "DOCS", "VAX_RATE", 
+                    "HEALTHCARE_COST", "DEATH_RATE")
   
-  # ============================================================================
-  # ============================================================================
-  # SECTION 2: REACTIVE VALUES
-  # ============================================================================
-  # ============================================================================
+  categorical_cols <- c("CODE", "GOVERN_TYPE", "HEALTHCARE_BASIS", "OBS_TYPE")
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 2: REACTIVE VALUES & STORAGE
+  # ========================================================================
+  # ========================================================================
   
   reactive_data <- reactiveVal(df)
-  recipe_object <- reactiveVal(NULL)
-  recipe_processed_data <- reactiveVal(NULL)
   model_results <- reactiveVal(NULL)
   train_test_split <- reactiveVal(NULL)
   missing_rpart_model <- reactiveVal(NULL)
   outlier_results <- reactiveVal(list())
   processed_data_working <- reactiveVal(standardize_missing(df))
-  recipe_objects <- reactiveVal(list())
-  recipe_names <- reactiveVal(character(0))
-  current_recipe_prepped <- reactiveVal(NULL)
-  recipe_comparison_results <- reactiveVal(data.frame())
   selected_model_dataset <- reactiveVal(NULL)
   
-  
-  # Pipeline steps reactive
-  pipeline_steps <- reactiveVal(list())
-  
-  # DEBUG: Monitor pipeline steps
-  observe({
-    steps <- pipeline_steps()
-    cat("\n=== PIPELINE STEPS UPDATED ===\n")
-    cat("Number of steps:", length(steps), "\n")
-    if(length(steps) > 0) {
-      # Check if steps is a list and each step is a list
-      if(is.list(steps) && length(steps) > 0) {
-        for(i in seq_along(steps)) {
-          step <- steps[[i]]
-          if(is.list(step)) {
-            cat("Step", i, ":", step$method %||% "No method", "- cols:", length(step$cols %||% character(0)), "\n")
-          } else {
-            cat("Step", i, ": Invalid step object - not a list\n")
-          }
-        }
-      } else {
-        cat("Steps object is not a valid list\n")
-      }
-    }
-    cat("===============================\n\n")
-  })
-  
-  # Saved pipelines storage
   saved_pipelines <- reactiveVal(list())
-  
-  # Saved datasets storage
   saved_datasets <- reactiveVal(list())
   
-  # Method display names for pipeline
+  pipeline_steps <- reactiveVal(list())
+  
+  processing_log <- reactiveVal(character(0))
+  
+  # COMPLETE method display names
   method_display_names <- list(
     "remove_na_rows" = "Remove rows with NAs",
     "remove_na_cols" = "Remove columns with NAs",
@@ -427,24 +311,18 @@ server <- function(input, output, session) {
     "remove_outliers_iforest" = "Remove outliers (Isolation Forest)",
     "impute_median" = "Impute with Median",
     "impute_mean" = "Impute with Mean",
-    "impute_knn" = "KNN Imputation",
     "impute_manual" = "Manual Imputation",
-    "impute_bag" = "Bagged Trees Imputation",
+    "impute_knn" = "Impute with KNN",
+    "impute_mice" = "Impute with MICE",
+    "impute_rf" = "Impute with Random Forest",
     "log_transform" = "Log Transformation",
     "sqrt_transform" = "Square Root Transformation",
-    "yeojohnson" = "Yeo-Johnson Transformation",
     "boxcox" = "Box-Cox Transformation",
+    "yeojohnson" = "Yeo-Johnson Transformation",
     "scale" = "Scale Data (Z-score)",
     "center" = "Center Data",
-    "nzv" = "Remove Near-Zero Variance",
-    "lincomb" = "Remove Linear Combinations"
+    "one_hot_encode" = "One-Hot Encode Categorical Variables"
   )
-  
-  # ----------------------------------------------------------------------------
-  # Processing Log
-  # ----------------------------------------------------------------------------
-  
-  processing_log <- reactiveVal(character(0))
   
   add_to_log <- function(message) {
     current_log <- processing_log()
@@ -457,18 +335,82 @@ server <- function(input, output, session) {
     if(length(processing_log()) == 0) add_to_log("Session started. Working with original dataset.")
   })
   
-  pipeline_steps(list())
+  # -------------------------------------------------------------------------
+  # Persistent Storage
+  # -------------------------------------------------------------------------
+  data_dir <- "saved_data"
+  if(!dir.exists(data_dir)) {
+    dir.create(data_dir, recursive = TRUE)
+  }
+  
+  save_all_data <- function() {
+    tryCatch({
+      datasets <- saved_datasets()
+      pipelines <- saved_pipelines()
+      save_list <- list(
+        datasets = datasets,
+        pipelines = pipelines,
+        timestamp = as.character(Sys.time())
+      )
+      saveRDS(save_list, file.path(data_dir, "app_data_backup.rds"))
+      cat("Data saved successfully\n")
+    }, error = function(e) {
+      cat("Save error:", e$message, "\n")
+    })
+  }
+  
+  load_all_data <- function() {
+    backup_file <- file.path(data_dir, "app_data_backup.rds")
+    if(file.exists(backup_file)) {
+      tryCatch({
+        save_list <- readRDS(backup_file)
+        if(!is.null(save_list$datasets) && length(save_list$datasets) > 0) {
+          saved_datasets(save_list$datasets)
+        }
+        if(!is.null(save_list$pipelines) && length(save_list$pipelines) > 0) {
+          saved_pipelines(save_list$pipelines)
+        }
+        add_to_log(paste("Loaded", length(save_list$datasets %||% list()), 
+                         "datasets and", length(save_list$pipelines %||% list()), 
+                         "recipes from backup"))
+        return(TRUE)
+      }, error = function(e) {
+        cat("Load error:", e$message, "\n")
+        return(FALSE)
+      })
+    }
+    return(FALSE)
+  }
+  
+  auto_save_timer <- reactiveTimer(30000)
+  observeEvent(auto_save_timer(), {
+    if(length(saved_datasets()) > 0 || length(saved_pipelines()) > 0) {
+      save_all_data()
+    }
+  })
+  
+  # Load saved data on startup
+  observeEvent(TRUE, {
+    isolate({ 
+      load_all_data()
+      Sys.sleep(0.1)
+      datasets <- saved_datasets()
+      if(length(datasets) > 0) {
+        updatePickerInput(session, "model_dataset_select", 
+                          choices = names(datasets),
+                          selected = names(datasets)[length(names(datasets))])
+      }
+    })
+  }, once = TRUE, ignoreNULL = FALSE)
   
   
-  # ============================================================================
-  # ============================================================================
-  # SECTION 3: MASTER FILTERED DATA (for Data Processing Strategy tab)
-  # ============================================================================
-  # ============================================================================
+  # ========================================================================
+  # ========================================================================
+  # SECTION 3: MASTER FILTERED DATA (Data Processing Strategy Tab)
+  # ========================================================================
+  # ========================================================================
   
   master_filtered_data <- reactive({
-    # Check if we're in the Data Processing Strategy tab
-    # Only run if master sidebar controls exist (they only exist in Tab 2)
     if(is.null(input$master_cat_vars) || is.null(input$master_numeric_vars)) {
       return(data.frame())
     }
@@ -477,29 +419,24 @@ server <- function(input, output, session) {
     selected_num <- input$master_numeric_vars
     selected_vars <- unique(c(selected_cat, selected_num))
     
-    # Better validation - return empty data frame instead of validate error
     if(length(selected_vars) == 0) {
       return(data.frame(CODE = character(), stringsAsFactors = FALSE))
     }
     
-    # ... rest of the function remains the same from here
     data <- df
     selected_vars <- selected_vars[!selected_vars %in% c("CODE", "OBS_TYPE")]
     
-    # Ensure we have valid columns
     selected_vars <- selected_vars[selected_vars %in% names(data)]
     if(length(selected_vars) == 0) {
       return(data.frame(CODE = character(), stringsAsFactors = FALSE))
     }
     
-    # Continue with the rest of your existing code...
     data <- data[, selected_vars, drop = FALSE]
     
     col_threshold <- input$master_col_missing_threshold %||% 100
     row_threshold <- input$master_row_missing_threshold %||% 15
     row_percent_threshold <- input$master_row_missing_percent %||% 100
     
-    # Convert all columns to character first for consistent handling
     data <- as.data.frame(lapply(data, as.character), stringsAsFactors = FALSE)
     
     col_missing_pct <- apply(data, 2, function(x) {
@@ -529,7 +466,6 @@ server <- function(input, output, session) {
       }
     }
     
-    # Ensure CODE is included for reference if needed
     if("CODE" %in% names(df) && !"CODE" %in% names(data)) {
       data$CODE <- df$CODE[keep_rows]
     }
@@ -537,17 +473,13 @@ server <- function(input, output, session) {
     return(data)
   })
   
-  
-  
   master_filtered_data_standardized <- reactive({
     data <- master_filtered_data()
     
-    # Return empty data frame if no data
     if(is.null(data) || nrow(data) == 0) {
       return(data.frame())
     }
     
-    # Rest of your existing code...
     for(col in names(data)) {
       vals <- as.character(data[[col]])
       was_numeric <- col %in% numeric_cols
@@ -567,167 +499,1293 @@ server <- function(input, output, session) {
   })
   
   
-  
-  
-  
-  
-  # ============================================================================
-  # ============================================================================
+  # ========================================================================
+  # ========================================================================
   # SECTION 4: SIDEBAR TOGGLE OBSERVERS
-  # ============================================================================
-  # ============================================================================
+  # ========================================================================
+  # ========================================================================
   
   sidebar_state <- reactiveValues(
     heatmap = TRUE, distribution = TRUE, boxplot = TRUE, correlation = TRUE,
     scatter = TRUE, mosaic = TRUE, ggpairs = TRUE, tabplot = TRUE, rising = TRUE, datatable = TRUE
   )
   
-  observe({
-    for(panel in names(sidebar_state)) sidebar_state[[panel]] <- TRUE
-  })
-  
-  observeEvent(input$toggle_heatmap_sidebar, {
-    if(sidebar_state$heatmap) {
-      shinyjs::addClass(id = "heatmap_wrapper", class = "sidebar-hidden")
-      sidebar_state$heatmap <- FALSE
-      updateActionButton(session, "toggle_heatmap_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
+  toggle_sidebar <- function(wrapper_id, sidebar_state_name, session, button_id) {
+    current_state <- sidebar_state[[sidebar_state_name]]
+    if(current_state) {
+      shinyjs::addClass(id = wrapper_id, class = "sidebar-hidden")
+      sidebar_state[[sidebar_state_name]] <- FALSE
+      updateActionButton(session, button_id, label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
     } else {
-      shinyjs::removeClass(id = "heatmap_wrapper", class = "sidebar-hidden")
-      sidebar_state$heatmap <- TRUE
-      updateActionButton(session, "toggle_heatmap_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
+      shinyjs::removeClass(id = wrapper_id, class = "sidebar-hidden")
+      sidebar_state[[sidebar_state_name]] <- TRUE
+      updateActionButton(session, button_id, label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
     }
-  })
+  }
   
-  observeEvent(input$toggle_distribution_sidebar, {
-    if(sidebar_state$distribution) {
-      shinyjs::addClass(id = "distribution_wrapper", class = "sidebar-hidden")
-      sidebar_state$distribution <- FALSE
-      updateActionButton(session, "toggle_distribution_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "distribution_wrapper", class = "sidebar-hidden")
-      sidebar_state$distribution <- TRUE
-      updateActionButton(session, "toggle_distribution_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
+  observeEvent(input$toggle_heatmap_sidebar, { toggle_sidebar("heatmap_wrapper", "heatmap", session, "toggle_heatmap_sidebar") })
+  observeEvent(input$toggle_distribution_sidebar, { toggle_sidebar("distribution_wrapper", "distribution", session, "toggle_distribution_sidebar") })
+  observeEvent(input$toggle_boxplot_sidebar, { toggle_sidebar("boxplot_wrapper", "boxplot", session, "toggle_boxplot_sidebar") })
+  observeEvent(input$toggle_correlation_sidebar, { toggle_sidebar("correlation_wrapper", "correlation", session, "toggle_correlation_sidebar") })
+  observeEvent(input$toggle_scatter_sidebar, { toggle_sidebar("scatter_wrapper", "scatter", session, "toggle_scatter_sidebar") })
+  observeEvent(input$toggle_mosaic_sidebar, { toggle_sidebar("mosaic_wrapper", "mosaic", session, "toggle_mosaic_sidebar") })
+  observeEvent(input$toggle_ggpairs_sidebar, { toggle_sidebar("ggpairs_wrapper", "ggpairs", session, "toggle_ggpairs_sidebar") })
+  observeEvent(input$toggle_tabplot_sidebar, { toggle_sidebar("tabplot_wrapper", "tabplot", session, "toggle_tabplot_sidebar") })
+  observeEvent(input$toggle_rising_sidebar, { toggle_sidebar("rising_wrapper", "rising", session, "toggle_rising_sidebar") })
+  observeEvent(input$toggle_datatable_sidebar, { toggle_sidebar("datatable_wrapper", "datatable", session, "toggle_datatable_sidebar") })
   
-  observeEvent(input$toggle_boxplot_sidebar, {
-    if(sidebar_state$boxplot) {
-      shinyjs::addClass(id = "boxplot_wrapper", class = "sidebar-hidden")
-      sidebar_state$boxplot <- FALSE
-      updateActionButton(session, "toggle_boxplot_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "boxplot_wrapper", class = "sidebar-hidden")
-      sidebar_state$boxplot <- TRUE
-      updateActionButton(session, "toggle_boxplot_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_correlation_sidebar, {
-    if(sidebar_state$correlation) {
-      runjs('document.getElementById("correlation_wrapper").classList.add("sidebar-hidden")')
-      sidebar_state$correlation <- FALSE
-      updateActionButton(session, "toggle_correlation_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      runjs('document.getElementById("correlation_wrapper").classList.remove("sidebar-hidden")')
-      sidebar_state$correlation <- TRUE
-      updateActionButton(session, "toggle_correlation_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_scatter_sidebar, {
-    if(sidebar_state$scatter) {
-      shinyjs::addClass(id = "scatter_wrapper", class = "sidebar-hidden")
-      sidebar_state$scatter <- FALSE
-      updateActionButton(session, "toggle_scatter_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "scatter_wrapper", class = "sidebar-hidden")
-      sidebar_state$scatter <- TRUE
-      updateActionButton(session, "toggle_scatter_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_mosaic_sidebar, {
-    if(sidebar_state$mosaic) {
-      shinyjs::addClass(id = "mosaic_wrapper", class = "sidebar-hidden")
-      sidebar_state$mosaic <- FALSE
-      updateActionButton(session, "toggle_mosaic_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "mosaic_wrapper", class = "sidebar-hidden")
-      sidebar_state$mosaic <- TRUE
-      updateActionButton(session, "toggle_mosaic_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_ggpairs_sidebar, {
-    if(sidebar_state$ggpairs) {
-      shinyjs::addClass(id = "ggpairs_wrapper", class = "sidebar-hidden")
-      sidebar_state$ggpairs <- FALSE
-      updateActionButton(session, "toggle_ggpairs_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "ggpairs_wrapper", class = "sidebar-hidden")
-      sidebar_state$ggpairs <- TRUE
-      updateActionButton(session, "toggle_ggpairs_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_tabplot_sidebar, {
-    if(sidebar_state$tabplot) {
-      shinyjs::addClass(id = "tabplot_wrapper", class = "sidebar-hidden")
-      sidebar_state$tabplot <- FALSE
-      updateActionButton(session, "toggle_tabplot_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "tabplot_wrapper", class = "sidebar-hidden")
-      sidebar_state$tabplot <- TRUE
-      updateActionButton(session, "toggle_tabplot_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_rising_sidebar, {
-    if(sidebar_state$rising) {
-      shinyjs::addClass(id = "rising_wrapper", class = "sidebar-hidden")
-      sidebar_state$rising <- FALSE
-      updateActionButton(session, "toggle_rising_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "rising_wrapper", class = "sidebar-hidden")
-      sidebar_state$rising <- TRUE
-      updateActionButton(session, "toggle_rising_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  observeEvent(input$toggle_datatable_sidebar, {
-    if(sidebar_state$datatable) {
-      shinyjs::addClass(id = "datatable_wrapper", class = "sidebar-hidden")
-      sidebar_state$datatable <- FALSE
-      updateActionButton(session, "toggle_datatable_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Filters'))
-    } else {
-      shinyjs::removeClass(id = "datatable_wrapper", class = "sidebar-hidden")
-      sidebar_state$datatable <- TRUE
-      updateActionButton(session, "toggle_datatable_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Filters'))
-    }
-  })
-  
-  # Master sidebar toggle observer
   master_sidebar_state <- reactiveValues(visible = TRUE)
-  
   observeEvent(input$toggle_master_sidebar, {
     if(master_sidebar_state$visible) {
       shinyjs::addClass(id = "master_sidebar_wrapper", class = "sidebar-hidden")
       master_sidebar_state$visible <- FALSE
-      updateActionButton(session, "toggle_master_sidebar", 
-                         label = HTML('<i class="fa fa-sliders-h"></i> Show Master Filters'))
+      updateActionButton(session, "toggle_master_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Master Filters'))
     } else {
       shinyjs::removeClass(id = "master_sidebar_wrapper", class = "sidebar-hidden")
       master_sidebar_state$visible <- TRUE
-      updateActionButton(session, "toggle_master_sidebar", 
-                         label = HTML('<i class="fa fa-sliders-h"></i> Hide Master Filters'))
+      updateActionButton(session, "toggle_master_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Master Filters'))
+    }
+  })
+  
+  observeEvent(input$toggle_model_sidebar, {
+    if(input$toggle_model_sidebar %% 2 == 1) {
+      shinyjs::hide(id = "model_sidebar_panel")
+      shinyjs::removeClass(id = "model_main_panel", class = "col-sm-9")
+      shinyjs::addClass(id = "model_main_panel", class = "col-sm-12")
+      updateActionButton(session, "toggle_model_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Show Settings Panel'))
+    } else {
+      shinyjs::show(id = "model_sidebar_panel")
+      shinyjs::removeClass(id = "model_main_panel", class = "col-sm-12")
+      shinyjs::addClass(id = "model_main_panel", class = "col-sm-9")
+      updateActionButton(session, "toggle_model_sidebar", label = HTML('<i class="fa fa-sliders-h"></i> Hide Settings Panel'))
     }
   })
   
   
+  # ========================================================================
+  # ========================================================================
+  # SECTION 5: PROCESSING STEPS UI (Recipe Builder)
+  # ========================================================================
+  # ========================================================================
+  
+  output$processing_steps_ui <- renderUI({
+    steps <- pipeline_steps()
+    
+    if(!is.list(steps) || length(steps) == 0) {
+      return(div(class = "alert alert-info", 
+                 icon("info-circle"), 
+                 "No steps added yet. Click 'Add Step' to begin building your processing pipeline."))
+    }
+    
+    current_data <- processed_data_working()
+    
+    # Get available columns for selection
+    all_cols_available <- names(current_data)
+    numeric_cols_available <- names(current_data)[sapply(current_data, is.numeric)]
+    categorical_cols_available <- names(current_data)[!sapply(current_data, is.numeric)]
+    
+    # Remove protected columns from selection where appropriate
+    numeric_cols_available <- numeric_cols_available[!numeric_cols_available %in% c("CODE", "OBS_TYPE")]
+    
+    tagList(lapply(seq_along(steps), function(idx) {
+      step <- steps[[idx]]
+      step_id <- step$id %||% idx
+      additional_info <- step$additional_info
+      
+      div(class = "well", style = "padding: 10px; margin-bottom: 15px; background-color: #f9f9f9; border-left: 4px solid #2C3E50;",
+          div(style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;",
+              strong(paste("Step", idx), style = "color: #2C3E50;"),
+              actionButton(paste0("remove_step_btn_", step_id), 
+                           label = HTML('<i class="fa fa-trash"></i> Remove'), 
+                           class = "btn-danger btn-xs",
+                           onclick = paste0("Shiny.setInputValue('remove_step', ", step_id, ")"))
+          ),
+          
+          selectInput(paste0("step_method_", step_id), "Processing Method",
+                      choices = c("-- Select --" = "",
+                                  "Row Operations" = "---",
+                                  "Remove Rows with NAs" = "remove_na_rows",
+                                  "Remove Rows by Index" = "remove_rows_by_index",
+                                  "Keep Rows by Index" = "keep_rows_by_index",
+                                  "Remove Outliers (IQR)" = "remove_outliers_iqr",
+                                  "Remove Outliers (Mahalanobis)" = "remove_outliers_mahalanobis",
+                                  "Remove Outliers (Cook's Distance)" = "remove_outliers_cooks",
+                                  "Remove Outliers (LOF)" = "remove_outliers_lof",
+                                  "Remove Outliers (Isolation Forest)" = "remove_outliers_iforest",
+                                  "Column Operations" = "---",
+                                  "Remove Columns with NAs" = "remove_na_cols",
+                                  "Remove Columns by Name" = "remove_cols_by_name",
+                                  "Keep Columns by Name" = "keep_cols_by_name",
+                                  "Imputation" = "---",
+                                  "Impute — Median" = "impute_median",
+                                  "Impute — Mean" = "impute_mean",
+                                  "Impute — Manual Value" = "impute_manual",
+                                  "Impute — KNN" = "impute_knn",
+                                  "Impute — MICE" = "impute_mice",
+                                  "Impute — Random Forest" = "impute_rf",
+                                  "Transformations" = "---",
+                                  "Transform — Log" = "log_transform",
+                                  "Transform — Square Root" = "sqrt_transform",
+                                  "Transform — Box-Cox" = "boxcox",
+                                  "Transform — Yeo-Johnson" = "yeojohnson",
+                                  "Scale Data" = "scale",
+                                  "Center Data" = "center",
+                                  "Encoding" = "---",
+                                  "One-Hot Encode" = "one_hot_encode"),
+                      selected = step$method %||% ""),
+          
+          # Column selector for methods that need columns
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] != '' && 
+                             input['step_method_", step_id, "'] != '---' &&
+                             input['step_method_", step_id, "'] != 'remove_na_rows' && 
+                             input['step_method_", step_id, "'] != 'remove_na_cols' &&
+                             input['step_method_", step_id, "'] != 'remove_outliers_mahalanobis' &&
+                             input['step_method_", step_id, "'] != 'remove_outliers_cooks' &&
+                             input['step_method_", step_id, "'] != 'remove_outliers_lof' &&
+                             input['step_method_", step_id, "'] != 'remove_outliers_iforest'"),
+            pickerInput(paste0("step_cols_", step_id), "Select Variables",
+                        choices = if(step$method %in% c("one_hot_encode")) categorical_cols_available else numeric_cols_available,
+                        selected = step$cols %||% character(0),
+                        multiple = TRUE,
+                        options = list(`actions-box` = TRUE, `live-search` = TRUE,
+                                       `selected-text-format` = "count > 3"))
+          ),
+          
+          # Remove NA rows threshold
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_na_rows'"),
+            sliderInput(paste0("step_na_row_threshold_", step_id), "Max Missing Values per Row",
+                        min = 0, max = 15, value = if(is.numeric(additional_info)) min(max(additional_info, 0), 15) else 3, step = 1)
+          ),
+          
+          # Remove NA cols threshold
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_na_cols'"),
+            sliderInput(paste0("step_na_col_threshold_", step_id), "Max Missing % per Column",
+                        min = 0, max = 100, value = if(is.numeric(additional_info)) min(max(additional_info, 0), 100) else 50, step = 5, post = "%")
+          ),
+          
+          # Manual imputation value
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'impute_manual'"),
+            numericInput(paste0("step_manual_val_", step_id), "Imputation Value", 
+                         value = if(is.numeric(additional_info)) additional_info else 0)
+          ),
+          
+          # KNN imputation parameters
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'impute_knn'"),
+            sliderInput(paste0("step_knn_k_", step_id), "Number of Neighbors (k):",
+                        min = 1, max = 20, value = if(is.numeric(additional_info)) min(max(additional_info, 1), 20) else 5, step = 1)
+          ),
+          
+          # MICE imputation parameters
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'impute_mice'"),
+            sliderInput(paste0("step_mice_iter_", step_id), "Number of Iterations:",
+                        min = 1, max = 20, value = if(is.numeric(additional_info)) min(max(additional_info, 1), 20) else 5, step = 1)
+          ),
+          
+          # Random Forest imputation parameters
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'impute_rf'"),
+            sliderInput(paste0("step_rf_ntree_", step_id), "Number of Trees:",
+                        min = 50, max = 500, value = if(is.numeric(additional_info)) min(max(additional_info, 50), 500) else 100, step = 50)
+          ),
+          
+          # Remove rows by index
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_rows_by_index'"),
+            textAreaInput(paste0("step_row_indices_", step_id), "Row indices to remove (comma-separated, e.g., 1,5,10,25 or 1:10):",
+                          value = "", rows = 2, placeholder = "1, 5, 10, 25, 50")
+          ),
+          
+          # Keep rows by index
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'keep_rows_by_index'"),
+            textAreaInput(paste0("step_row_keep_indices_", step_id), "Row indices to keep (comma-separated, e.g., 1,5,10,25 or 1:10):",
+                          value = "", rows = 2, placeholder = "1, 5, 10, 25, 50")
+          ),
+          
+          # Remove columns by name
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_cols_by_name'"),
+            pickerInput(paste0("step_cols_remove_", step_id), "Select columns to remove:",
+                        choices = all_cols_available,
+                        selected = NULL,
+                        multiple = TRUE,
+                        options = list(`actions-box` = TRUE, `live-search` = TRUE))
+          ),
+          
+          # Keep columns by name
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'keep_cols_by_name'"),
+            pickerInput(paste0("step_cols_keep_", step_id), "Select columns to keep:",
+                        choices = all_cols_available,
+                        selected = NULL,
+                        multiple = TRUE,
+                        options = list(`actions-box` = TRUE, `live-search` = TRUE))
+          ),
+          
+          # IQR outlier removal
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_iqr'"),
+            pickerInput(paste0("step_outlier_vars_", step_id), "Select variables for outlier detection:",
+                        choices = numeric_cols_available,
+                        selected = numeric_cols_available[1:min(3, length(numeric_cols_available))],
+                        multiple = TRUE,
+                        options = list(`actions-box` = TRUE, `live-search` = TRUE)),
+            sliderInput(paste0("step_outlier_iqr_mult_", step_id), "IQR Multiplier:",
+                        min = 1, max = 5, value = 1.5, step = 0.1)
+          ),
+          
+          # Mahalanobis outlier removal
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_mahalanobis'"),
+            sliderInput(paste0("step_outlier_mahalanobis_prob_", step_id), "Chi-Square Probability Threshold:",
+                        min = 0.9, max = 0.9999, value = 0.999, step = 0.001)
+          ),
+          
+          # Cook's Distance outlier removal
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_cooks'"),
+            selectInput(paste0("step_outlier_cooks_method_", step_id), "Threshold Method:",
+                        choices = c("4 * mean" = "4mean", "4/n" = "4n", "Quantile 0.99" = "quantile"),
+                        selected = "4mean")
+          ),
+          
+          # LOF outlier removal
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_lof'"),
+            sliderInput(paste0("step_outlier_lof_minpts_", step_id), "minPts (neighbors):",
+                        min = 3, max = 20, value = 5, step = 1),
+            sliderInput(paste0("step_outlier_lof_threshold_", step_id), "LOF Threshold:",
+                        min = 1, max = 5, value = 2, step = 0.1)
+          ),
+          
+          # Isolation Forest outlier removal
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_iforest'"),
+            sliderInput(paste0("step_outlier_if_threshold_", step_id), "Isolation Forest Threshold:",
+                        min = 0.5, max = 0.95, value = 0.6, step = 0.01)
+          ),
+          
+          # One-hot encoding options
+          conditionalPanel(
+            condition = paste0("input['step_method_", step_id, "'] == 'one_hot_encode'"),
+            div(class = "alert alert-info", style = "padding: 8px; margin-top: 5px; font-size: 11px;",
+                icon("info-circle"),
+                HTML("<strong>One-Hot Encoding:</strong> Creates binary columns for each category.")),
+            checkboxInput(paste0("step_onehot_drop_first_", step_id), 
+                          "Drop first category (avoid multicollinearity)", 
+                          value = TRUE),
+            checkboxInput(paste0("step_onehot_handle_na_", step_id), 
+                          "Create 'Missing' category for NA values", 
+                          value = TRUE)
+          )
+      )
+    }))
+  })
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 6: STEP MANAGEMENT
+  # ========================================================================
+  # ========================================================================
+  
+  # Add step
+  observeEvent(input$add_processing_step, {
+    current <- pipeline_steps()
+    id <- if(length(current) == 0) 1 else max(sapply(current, function(x) x$id)) + 1
+    
+    new_step <- list(
+      id = id,
+      method = "",
+      cols = character(0),
+      additional_info = NULL
+    )
+    pipeline_steps(append(current, list(new_step)))
+    add_to_log(paste("Added pipeline step", id))
+  })
+  
+  # Remove step
+  observeEvent(input$remove_step, {
+    step_to_remove <- as.numeric(input$remove_step)
+    current <- pipeline_steps()
+    if(step_to_remove <= length(current) && step_to_remove > 0) {
+      current <- current[-step_to_remove]
+      # Reassign IDs sequentially
+      for(i in seq_along(current)) {
+        current[[i]]$id <- i
+      }
+      pipeline_steps(current)
+      add_to_log(paste("Removed pipeline step", step_to_remove))
+    }
+  })
+  
+  # Update step parameters - COMPREHENSIVE VERSION
+  observe({
+    steps <- pipeline_steps()
+    if(length(steps) == 0) return()
+    
+    updated <- FALSE
+    
+    for(i in seq_along(steps)) {
+      step_id <- steps[[i]]$id
+      
+      # Update method
+      method_input <- input[[paste0("step_method_", step_id)]]
+      if(!is.null(method_input) && method_input != "" && method_input != "---") {
+        if(steps[[i]]$method != method_input) {
+          steps[[i]]$method <- method_input
+          # Clear columns when method changes (except for specific methods)
+          if(!method_input %in% c("remove_na_rows", "remove_na_cols", "remove_outliers_mahalanobis", 
+                                  "remove_outliers_cooks", "remove_outliers_lof", "remove_outliers_iforest")) {
+            steps[[i]]$cols <- character(0)
+          }
+          updated <- TRUE
+        }
+      }
+      
+      # Update columns for methods that use them
+      cols_input <- input[[paste0("step_cols_", step_id)]]
+      if(!is.null(cols_input) && !identical(steps[[i]]$cols, cols_input)) {
+        steps[[i]]$cols <- cols_input
+        updated <- TRUE
+      }
+      
+      # Update method-specific parameters
+      if(steps[[i]]$method == "remove_na_rows") {
+        val <- input[[paste0("step_na_row_threshold_", step_id)]]
+        if(!is.null(val) && !identical(steps[[i]]$additional_info, val)) {
+          steps[[i]]$additional_info <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_na_cols") {
+        val <- input[[paste0("step_na_col_threshold_", step_id)]]
+        if(!is.null(val) && !identical(steps[[i]]$additional_info, val)) {
+          steps[[i]]$additional_info <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "impute_manual") {
+        val <- input[[paste0("step_manual_val_", step_id)]]
+        if(!is.null(val) && !identical(steps[[i]]$additional_info, val)) {
+          steps[[i]]$additional_info <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "impute_knn") {
+        val <- input[[paste0("step_knn_k_", step_id)]]
+        if(!is.null(val) && !identical(steps[[i]]$additional_info, val)) {
+          steps[[i]]$additional_info <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "impute_mice") {
+        val <- input[[paste0("step_mice_iter_", step_id)]]
+        if(!is.null(val) && !identical(steps[[i]]$additional_info, val)) {
+          steps[[i]]$additional_info <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "impute_rf") {
+        val <- input[[paste0("step_rf_ntree_", step_id)]]
+        if(!is.null(val) && !identical(steps[[i]]$additional_info, val)) {
+          steps[[i]]$additional_info <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_rows_by_index") {
+        val <- input[[paste0("step_row_indices_", step_id)]]
+        if(!is.null(val) && val != "") {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$indices <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "keep_rows_by_index") {
+        val <- input[[paste0("step_row_keep_indices_", step_id)]]
+        if(!is.null(val) && val != "") {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$keep_indices <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_cols_by_name") {
+        val <- input[[paste0("step_cols_remove_", step_id)]]
+        if(!is.null(val)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$remove_cols <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "keep_cols_by_name") {
+        val <- input[[paste0("step_cols_keep_", step_id)]]
+        if(!is.null(val)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$keep_cols <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_outliers_iqr") {
+        vars <- input[[paste0("step_outlier_vars_", step_id)]]
+        mult <- input[[paste0("step_outlier_iqr_mult_", step_id)]]
+        if(!is.null(vars) || !is.null(mult)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          if(!is.null(vars)) steps[[i]]$additional_info$outlier_vars <- vars
+          if(!is.null(mult)) steps[[i]]$additional_info$iqr_multiplier <- mult
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_outliers_mahalanobis") {
+        val <- input[[paste0("step_outlier_mahalanobis_prob_", step_id)]]
+        if(!is.null(val)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$mahalanobis_prob <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_outliers_cooks") {
+        val <- input[[paste0("step_outlier_cooks_method_", step_id)]]
+        if(!is.null(val)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$cooks_method <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_outliers_lof") {
+        minPts <- input[[paste0("step_outlier_lof_minpts_", step_id)]]
+        threshold <- input[[paste0("step_outlier_lof_threshold_", step_id)]]
+        if(!is.null(minPts) || !is.null(threshold)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          if(!is.null(minPts)) steps[[i]]$additional_info$lof_minpts <- minPts
+          if(!is.null(threshold)) steps[[i]]$additional_info$lof_threshold <- threshold
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "remove_outliers_iforest") {
+        val <- input[[paste0("step_outlier_if_threshold_", step_id)]]
+        if(!is.null(val)) {
+          if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+          steps[[i]]$additional_info$if_threshold <- val
+          updated <- TRUE
+        }
+      } else if(steps[[i]]$method == "one_hot_encode") {
+        drop_first <- input[[paste0("step_onehot_drop_first_", step_id)]]
+        handle_na <- input[[paste0("step_onehot_handle_na_", step_id)]]
+        if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
+        if(!identical(steps[[i]]$additional_info$drop_first, drop_first)) {
+          steps[[i]]$additional_info$drop_first <- drop_first
+          updated <- TRUE
+        }
+        if(!identical(steps[[i]]$additional_info$handle_na, handle_na)) {
+          steps[[i]]$additional_info$handle_na <- handle_na
+          updated <- TRUE
+        }
+      }
+    }
+    
+    if(updated) pipeline_steps(steps)
+  })
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 7: APPLY STEPS FUNCTION (with column validation & error handling)
+  # ========================================================================
+  # ========================================================================
+  
+  # Helper function to parse indices (comma-separated or range format)
+  parse_indices <- function(indices_text, max_row) {
+    if(is.null(indices_text) || indices_text == "") return(c())
+    indices_parts <- unlist(strsplit(indices_text, ","))
+    indices <- c()
+    for(part in indices_parts) {
+      part <- trimws(part)
+      if(grepl(":", part)) {
+        range_parts <- as.numeric(unlist(strsplit(part, ":")))
+        if(length(range_parts) == 2 && !any(is.na(range_parts))) {
+          indices <- c(indices, seq(range_parts[1], range_parts[2]))
+        }
+      } else {
+        idx <- as.numeric(part)
+        if(!is.na(idx)) indices <- c(indices, idx)
+      }
+    }
+    indices <- unique(round(indices))
+    indices <- indices[indices >= 1 & indices <= max_row]
+    return(indices)
+  }
+  
+  apply_steps_to_data <- function(data, steps) {
+    # Safety check
+    if(is.null(data) || nrow(data) == 0) {
+      add_to_log("    ERROR: No data provided to apply_steps_to_data")
+      return(data)
+    }
+    
+    if(is.null(steps) || length(steps) == 0) {
+      add_to_log("    No steps to apply")
+      return(data)
+    }
+    
+    for(step_idx in seq_along(steps)) {
+      step <- steps[[step_idx]]
+      method <- step$method
+      if(is.null(method) || method == "") next
+      
+      add_to_log(paste("  Step", step_idx, ":", method_display_names[[method]] %||% method))
+      
+      # Get columns and validate they exist
+      cols <- step$cols
+      if(!is.null(cols) && length(cols) > 0 && !method %in% c("remove_na_rows", "remove_na_cols", 
+                                                              "remove_outliers_mahalanobis", "remove_outliers_cooks",
+                                                              "remove_outliers_lof", "remove_outliers_iforest")) {
+        valid_cols <- cols[cols %in% names(data)]
+        if(length(valid_cols) < length(cols)) {
+          removed_cols <- setdiff(cols, valid_cols)
+          add_to_log(paste("    Warning: Columns", paste(removed_cols, collapse=", "), 
+                           "no longer exist in data - skipping for this step"))
+        }
+        cols <- valid_cols
+        
+        if(length(cols) == 0) {
+          add_to_log(paste("    No valid columns for method", method, "- skipping step"))
+          next
+        }
+      }
+      
+      tryCatch({
+        # ===== ROW OPERATIONS =====
+        if(method == "remove_na_rows") {
+          threshold <- if(is.numeric(step$additional_info)) step$additional_info else 3
+          row_na_count <- apply(data, 1, function(x) sum(is.na(x)))
+          before <- nrow(data)
+          data <- data[row_na_count <= threshold, , drop = FALSE]
+          removed <- before - nrow(data)
+          add_to_log(paste("    Removed", removed, "rows with >", threshold, "missing values"))
+          
+        } else if(method == "remove_na_cols") {
+          threshold <- if(is.numeric(step$additional_info)) step$additional_info else 50
+          before <- ncol(data)
+          col_na_pct <- colMeans(is.na(data)) * 100
+          cols_to_keep <- names(col_na_pct)[col_na_pct <= threshold]
+          essential <- c("CODE", "OBS_TYPE", "DEATH_RATE")
+          cols_to_keep <- unique(c(cols_to_keep, essential[essential %in% names(data)]))
+          if(length(cols_to_keep) > 0) {
+            data <- data[, cols_to_keep, drop = FALSE]
+          }
+          removed <- before - ncol(data)
+          add_to_log(paste("    Removed", removed, "columns with >", threshold, "% missing values"))
+          
+        } else if(method == "remove_rows_by_index") {
+          indices_text <- if(is.list(step$additional_info)) step$additional_info$indices %||% "" else ""
+          if(indices_text != "") {
+            indices <- parse_indices(indices_text, nrow(data))
+            if(length(indices) > 0) {
+              before <- nrow(data)
+              data <- data[-indices, , drop = FALSE]
+              add_to_log(paste("    Removed", before - nrow(data), "rows by index"))
+            }
+          }
+          
+        } else if(method == "keep_rows_by_index") {
+          indices_text <- if(is.list(step$additional_info)) step$additional_info$keep_indices %||% "" else ""
+          if(indices_text != "") {
+            indices <- parse_indices(indices_text, nrow(data))
+            if(length(indices) > 0) {
+              before <- nrow(data)
+              data <- data[indices, , drop = FALSE]
+              add_to_log(paste("    Kept", nrow(data), "rows, removed", before - nrow(data), "rows"))
+            }
+          }
+          
+          # ===== IMPUTATION METHODS =====
+        } else if(method == "impute_median" && length(cols) > 0) {
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              na_count <- sum(is.na(data[[col]]))
+              if(na_count > 0) {
+                data[[col]][is.na(data[[col]])] <- median(data[[col]], na.rm = TRUE)
+                add_to_log(paste("    Imputed", na_count, "values in", col, "with median"))
+              }
+            }
+          }
+          
+        } else if(method == "impute_mean" && length(cols) > 0) {
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              na_count <- sum(is.na(data[[col]]))
+              if(na_count > 0) {
+                data[[col]][is.na(data[[col]])] <- mean(data[[col]], na.rm = TRUE)
+                add_to_log(paste("    Imputed", na_count, "values in", col, "with mean"))
+              }
+            }
+          }
+          
+        } else if(method == "impute_manual" && length(cols) > 0) {
+          impute_val <- if(is.numeric(step$additional_info)) step$additional_info else 0
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              na_count <- sum(is.na(data[[col]]))
+              if(na_count > 0) {
+                data[[col]][is.na(data[[col]])] <- impute_val
+                add_to_log(paste("    Imputed", na_count, "values in", col, "with", impute_val))
+              }
+            }
+          }
+          
+        } else if(method == "impute_knn" && length(cols) > 0) {
+          if(requireNamespace("VIM", quietly = TRUE)) {
+            valid_cols <- cols[cols %in% names(data) & sapply(data[cols], is.numeric)]
+            if(length(valid_cols) > 0) {
+              k_val <- if(is.list(step$additional_info)) step$additional_info %||% 5 else step$additional_info %||% 5
+              imputed_data <- VIM::kNN(data[, valid_cols, drop = FALSE], k = k_val, imp_var = FALSE)
+              data[, valid_cols] <- imputed_data
+              add_to_log(paste("    Performed KNN imputation on", length(valid_cols), "variables with k =", k_val))
+            }
+          } else {
+            add_to_log("    KNN imputation requires VIM package - skipping")
+          }
+          
+        } else if(method == "impute_mice" && length(cols) > 0) {
+          if(requireNamespace("mice", quietly = TRUE)) {
+            valid_cols <- cols[cols %in% names(data)]
+            if(length(valid_cols) > 0) {
+              iter_val <- if(is.list(step$additional_info)) step$additional_info %||% 5 else step$additional_info %||% 5
+              mice_result <- mice::mice(data[, valid_cols, drop = FALSE], m = 1, maxit = iter_val, printFlag = FALSE)
+              data[, valid_cols] <- mice::complete(mice_result)
+              add_to_log(paste("    Performed MICE imputation on", length(valid_cols), "variables with", iter_val, "iterations"))
+            }
+          } else {
+            add_to_log("    MICE imputation requires mice package - skipping")
+          }
+          
+        } else if(method == "impute_rf" && length(cols) > 0) {
+          if(requireNamespace("missForest", quietly = TRUE)) {
+            valid_cols <- cols[cols %in% names(data)]
+            if(length(valid_cols) > 0) {
+              ntree_val <- if(is.list(step$additional_info)) step$additional_info %||% 100 else step$additional_info %||% 100
+              rf_result <- missForest::missForest(data[, valid_cols, drop = FALSE], ntree = ntree_val, verbose = FALSE)
+              data[, valid_cols] <- rf_result$ximp
+              add_to_log(paste("    Performed Random Forest imputation on", length(valid_cols), "variables with", ntree_val, "trees"))
+            }
+          } else {
+            add_to_log("    Random Forest imputation requires missForest package - skipping")
+          }
+          
+          # ===== OUTLIER REMOVAL =====
+        } else if(method == "remove_outliers_iqr") {
+          outlier_vars <- if(is.list(step$additional_info)) step$additional_info$outlier_vars %||% character(0) else character(0)
+          iqr_mult <- if(is.list(step$additional_info)) step$additional_info$iqr_multiplier %||% 1.5 else 1.5
+          if(length(outlier_vars) > 0) {
+            outlier_vars <- outlier_vars[outlier_vars %in% names(data)]
+            if(length(outlier_vars) > 0) {
+              result <- remove_outliers_iqr(data, outlier_vars, iqr_mult)
+              data <- result$data
+              add_to_log(paste("    Removed", result$removed, "outliers using IQR method"))
+            }
+          }
+          
+        } else if(method == "remove_outliers_mahalanobis") {
+          prob <- if(is.list(step$additional_info)) step$additional_info$mahalanobis_prob %||% 0.999 else 0.999
+          result <- remove_outliers_mahalanobis(data, prob)
+          data <- result$data
+          if(result$removed > 0) {
+            add_to_log(paste("    Removed", result$removed, "outliers using Mahalanobis distance"))
+          }
+          
+        } else if(method == "remove_outliers_cooks") {
+          cooks_method <- if(is.list(step$additional_info)) step$additional_info$cooks_method %||% "4mean" else "4mean"
+          result <- remove_outliers_cooks(data, cooks_method)
+          data <- result$data
+          if(result$removed > 0) {
+            add_to_log(paste("    Removed", result$removed, "outliers using Cook's distance"))
+          }
+          
+        } else if(method == "remove_outliers_lof") {
+          minPts <- if(is.list(step$additional_info)) step$additional_info$lof_minpts %||% 5 else 5
+          lof_threshold <- if(is.list(step$additional_info)) step$additional_info$lof_threshold %||% 2 else 2
+          result <- remove_outliers_lof(data, minPts, lof_threshold)
+          data <- result$data
+          if(result$removed > 0) {
+            add_to_log(paste("    Removed", result$removed, "outliers using Local Outlier Factor"))
+          }
+          
+        } else if(method == "remove_outliers_iforest") {
+          if_threshold <- if(is.list(step$additional_info)) step$additional_info$if_threshold %||% 0.6 else 0.6
+          result <- remove_outliers_iforest(data, if_threshold)
+          data <- result$data
+          if(result$removed > 0) {
+            add_to_log(paste("    Removed", result$removed, "outliers using Isolation Forest"))
+          }
+          
+          # ===== COLUMN OPERATIONS =====
+        } else if(method == "remove_cols_by_name") {
+          cols_to_remove <- if(is.list(step$additional_info)) step$additional_info$remove_cols %||% character(0) else character(0)
+          if(length(cols_to_remove) > 0) {
+            protected_cols <- c("CODE", "OBS_TYPE", "DEATH_RATE")
+            cols_to_remove <- cols_to_remove[!cols_to_remove %in% protected_cols]
+            cols_to_remove <- cols_to_remove[cols_to_remove %in% names(data)]
+            if(length(cols_to_remove) > 0) {
+              before <- ncol(data)
+              data <- data[, !names(data) %in% cols_to_remove, drop = FALSE]
+              add_to_log(paste("    Removed", before - ncol(data), "columns by name"))
+            }
+          }
+          
+        } else if(method == "keep_cols_by_name") {
+          cols_to_keep <- if(is.list(step$additional_info)) step$additional_info$keep_cols %||% character(0) else character(0)
+          if(length(cols_to_keep) > 0) {
+            always_keep <- c("CODE", "OBS_TYPE", "DEATH_RATE")
+            cols_to_keep <- unique(c(cols_to_keep, always_keep[always_keep %in% names(data)]))
+            cols_to_keep <- cols_to_keep[cols_to_keep %in% names(data)]
+            if(length(cols_to_keep) > 0) {
+              before <- ncol(data)
+              data <- data[, names(data) %in% cols_to_keep, drop = FALSE]
+              add_to_log(paste("    Kept", ncol(data), "columns, removed", before - ncol(data), "columns"))
+            }
+          }
+          
+          # ===== TRANSFORMATIONS =====
+        } else if(method == "log_transform" && length(cols) > 0) {
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              min_val <- min(data[[col]], na.rm = TRUE)
+              if(min_val <= 0) {
+                data[[col]] <- log(data[[col]] + abs(min_val) + 1)
+              } else {
+                data[[col]] <- log(data[[col]])
+              }
+              add_to_log(paste("    Log transformed", col))
+            }
+          }
+          
+        } else if(method == "sqrt_transform" && length(cols) > 0) {
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              min_val <- min(data[[col]], na.rm = TRUE)
+              if(min_val < 0) {
+                data[[col]] <- sqrt(data[[col]] + abs(min_val) + 1)
+              } else {
+                data[[col]] <- sqrt(data[[col]])
+              }
+              add_to_log(paste("    Square root transformed", col))
+            }
+          }
+          
+        } else if(method == "scale" && length(cols) > 0) {
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              data[[col]] <- scale(data[[col]])
+              add_to_log(paste("    Scaled", col))
+            }
+          }
+          
+        } else if(method == "center" && length(cols) > 0) {
+          for(col in cols) {
+            if(col %in% names(data) && is.numeric(data[[col]])) {
+              data[[col]] <- data[[col]] - mean(data[[col]], na.rm = TRUE)
+              add_to_log(paste("    Centered", col))
+            }
+          }
+          
+          # ===== ENCODING =====
+        } else if(method == "one_hot_encode" && length(cols) > 0) {
+          drop_first <- if(is.list(step$additional_info)) step$additional_info$drop_first %||% TRUE else TRUE
+          handle_na <- if(is.list(step$additional_info)) step$additional_info$handle_na %||% TRUE else TRUE
+          
+          for(col in cols) {
+            if(col %in% names(data) && !is.numeric(data[[col]])) {
+              if(handle_na && any(is.na(data[[col]]))) {
+                data[[col]][is.na(data[[col]])] <- "MISSING"
+              }
+              if(!is.factor(data[[col]])) {
+                data[[col]] <- as.factor(data[[col]])
+              }
+              
+              if(drop_first) {
+                one_hot <- model.matrix(~ . - 1, data = data[, col, drop = FALSE])
+              } else {
+                one_hot <- model.matrix(~ ., data = data[, col, drop = FALSE])
+                if("(Intercept)" %in% colnames(one_hot)) {
+                  one_hot <- one_hot[, !colnames(one_hot) %in% "(Intercept)", drop = FALSE]
+                }
+              }
+              
+              colnames(one_hot) <- gsub(paste0("^", col), paste0(col, "_"), colnames(one_hot))
+              colnames(one_hot) <- gsub(" ", "_", colnames(one_hot))
+              colnames(one_hot) <- gsub("[^a-zA-Z0-9_]", "", colnames(one_hot))
+              
+              one_hot_df <- as.data.frame(one_hot)
+              data[[col]] <- NULL
+              data <- cbind(data, one_hot_df)
+              add_to_log(paste("    One-hot encoded", col, "into", ncol(one_hot_df), "binary columns"))
+            }
+          }
+        }
+        
+      }, error = function(e) {
+        add_to_log(paste("    ERROR in step", step_idx, "(", method, "):", e$message))
+      })
+    }
+    
+    return(data)
+  }
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 8: RECIPE ACTIONS
+  # ========================================================================
+  # ========================================================================
+  
+  # Apply Recipe button (current pipeline steps)
+  observeEvent(input$process_data_btn, {
+    steps <- pipeline_steps()
+    if(length(steps) == 0) {
+      showNotification("No steps in pipeline. Add steps first.", type = "warning")
+      return()
+    }
+    
+    add_to_log(paste("=== Starting pipeline processing with", length(steps), "steps ==="))
+    
+    # Use current working data
+    data <- isolate(processed_data_working())
+    
+    # Validate data
+    if(is.null(data) || nrow(data) == 0) {
+      showNotification("No data available. Please check your data source.", type = "error")
+      return()
+    }
+    
+    original_rows <- nrow(data)
+    original_cols <- ncol(data)
+    
+    # Apply steps with error handling
+    data <- tryCatch({
+      apply_steps_to_data(data, steps)
+    }, error = function(e) {
+      add_to_log(paste("ERROR applying recipe:", e$message))
+      showNotification(paste("Error applying recipe:", e$message), type = "error", duration = 8)
+      return(NULL)
+    })
+    
+    if(is.null(data)) {
+      return()
+    }
+    
+    processed_data_working(data)
+    add_to_log(paste("=== Pipeline complete: from", original_rows, "rows to", nrow(data), 
+                     "rows, from", original_cols, "cols to", ncol(data), "cols ==="))
+    showNotification(paste("✓ Pipeline complete!", nrow(data), "rows,", ncol(data), "columns"), 
+                     type = "message", duration = 5)
+  })
+  
+  # Reset pipeline (clear steps only, keep data)
+  observeEvent(input$reset_pipeline_btn, {
+    pipeline_steps(list())
+    add_to_log("Reset pipeline - all steps cleared")
+    showNotification("Pipeline steps cleared", type = "message")
+  })
+  
+  # Clear all steps with confirmation
+  observeEvent(input$clear_pipeline_btn, {
+    showModal(modalDialog(
+      title = "Clear All Steps", 
+      "Are you sure you want to clear all steps from the current recipe?",
+      footer = tagList(
+        modalButton("Cancel"), 
+        actionButton("confirm_clear_steps", "Clear All", class = "btn-danger")
+      ), 
+      easyClose = TRUE
+    ))
+  })
+  
+  observeEvent(input$confirm_clear_steps, {
+    pipeline_steps(list())
+    updateTextInput(session, "pipeline_name", value = "")
+    updateTextAreaInput(session, "pipeline_comments", value = "")
+    add_to_log("Cleared all pipeline steps")
+    showNotification("All steps cleared", type = "message")
+    removeModal()
+  })
+  
+  # Save recipe
+  observeEvent(input$save_pipeline_btn, {
+    pipeline_name <- trimws(input$pipeline_name)
+    if(pipeline_name == "") {
+      showNotification("Please enter a recipe name", type = "error")
+      return()
+    }
+    
+    steps <- pipeline_steps()
+    if(!is.list(steps) || length(steps) == 0) {
+      showNotification("No steps in recipe. Add steps first.", type = "error")
+      return()
+    }
+    
+    current <- saved_pipelines()
+    original_name <- pipeline_name
+    counter <- 1
+    
+    # Handle duplicate names
+    while(pipeline_name %in% names(current)) {
+      pipeline_name <- paste0(original_name, "_v", counter)
+      counter <- counter + 1
+    }
+    
+    if(pipeline_name != original_name) {
+      showNotification(paste("Name already exists. Saved as:", pipeline_name), type = "warning")
+    }
+    
+    # Save the recipe
+    current[[pipeline_name]] <- list(
+      steps = steps, 
+      created = Sys.time(), 
+      comments = trimws(input$pipeline_comments %||% "")
+    )
+    saved_pipelines(current)
+    save_all_data()
+    
+    # Clear inputs
+    updateTextInput(session, "pipeline_name", value = "")
+    updateTextAreaInput(session, "pipeline_comments", value = "")
+    
+    showNotification(paste("Recipe saved as:", pipeline_name, "-", length(steps), "steps"), type = "message")
+    add_to_log(paste("Saved recipe:", pipeline_name))
+  })
+  
+  # Save As New Recipe
+  observeEvent(input$save_as_pipeline_btn, {
+    steps <- pipeline_steps()
+    if(!is.list(steps) || length(steps) == 0) {
+      showNotification("No steps in recipe. Add steps first.", type = "error")
+      return()
+    }
+    
+    base_name <- trimws(input$pipeline_name)
+    if(base_name == "") {
+      base_name <- paste0("Recipe_", format(Sys.time(), "%Y%m%d_%H%M"))
+    }
+    
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    new_name <- paste0(base_name, "_", timestamp)
+    new_name <- gsub(" ", "_", new_name)
+    new_name <- gsub("[^a-zA-Z0-9_]", "", new_name)
+    
+    current <- saved_pipelines()
+    current[[new_name]] <- list(
+      steps = steps, 
+      created = Sys.time(), 
+      comments = trimws(input$pipeline_comments %||% paste("Saved on", format(Sys.time(), "%Y-%m-%d %H:%M")))
+    )
+    saved_pipelines(current)
+    save_all_data()
+    
+    # Clear inputs
+    updateTextInput(session, "pipeline_name", value = "")
+    updateTextAreaInput(session, "pipeline_comments", value = "")
+    
+    showNotification(paste("✓ Recipe saved as NEW:", new_name, "-", length(steps), "steps"), type = "message")
+    add_to_log(paste("Saved new recipe:", new_name))
+  })
+  
+  # Load recipe (load steps into pipeline without applying)
+  observeEvent(input$load_pipeline_trigger, {
+    req(input$load_pipeline_trigger)
+    pipeline_name <- input$load_pipeline_trigger
+    
+    if(!pipeline_name %in% names(saved_pipelines())) {
+      showNotification(paste("Recipe", pipeline_name, "not found"), type = "error")
+      return()
+    }
+    
+    saved_pipeline <- saved_pipelines()[[pipeline_name]]
+    
+    if(is.null(saved_pipeline$steps) || !is.list(saved_pipeline$steps)) {
+      showNotification(paste("Recipe", pipeline_name, "has invalid step data"), type = "error")
+      return()
+    }
+    
+    loaded_steps <- saved_pipeline$steps
+    
+    if(length(loaded_steps) == 0) {
+      showNotification(paste("Recipe", pipeline_name, "has no steps"), type = "warning")
+      pipeline_steps(list())
+      return()
+    }
+    
+    # Reconstruct steps with proper IDs
+    reconstructed_steps <- list()
+    for(i in seq_along(loaded_steps)) {
+      step <- loaded_steps[[i]]
+      if(is.list(step)) {
+        reconstructed_step <- list(
+          id = i, 
+          method = step$method %||% "", 
+          cols = step$cols %||% character(0), 
+          additional_info = step$additional_info %||% NULL
+        )
+        if(reconstructed_step$method != "") {
+          reconstructed_steps[[i]] <- reconstructed_step
+        }
+      }
+    }
+    
+    reconstructed_steps <- reconstructed_steps[!sapply(reconstructed_steps, is.null)]
+    
+    if(length(reconstructed_steps) == 0) {
+      showNotification("No valid steps found in recipe", type = "error")
+      return()
+    }
+    
+    pipeline_steps(reconstructed_steps)
+    updateTextInput(session, "pipeline_name", value = paste0(pipeline_name, "_modified"))
+    
+    comments_msg <- if(!is.null(saved_pipeline$comments) && saved_pipeline$comments != "") {
+      paste0(" - Notes: ", saved_pipeline$comments)
+    } else { "" }
+    
+    showNotification(paste("✓ Loaded recipe:", pipeline_name, "-", length(reconstructed_steps), "steps", comments_msg), 
+                     type = "message", duration = 5)
+    add_to_log(paste("Loaded saved recipe:", pipeline_name))
+  })
+  
+  # Delete recipe
+  observeEvent(input$delete_pipeline_trigger, {
+    pipeline_name <- input$delete_pipeline_trigger
+    
+    if(!is.null(pipeline_name) && pipeline_name != "" && pipeline_name %in% names(saved_pipelines())) {
+      showModal(modalDialog(
+        title = "Delete Recipe", 
+        paste("Are you sure you want to delete the recipe:", pipeline_name, "?"),
+        footer = tagList(
+          modalButton("Cancel"), 
+          actionButton("confirm_delete_pipeline", "Delete", class = "btn-danger")
+        ), 
+        easyClose = TRUE
+      ))
+      
+      pipeline_to_delete <- pipeline_name
+      
+      observeEvent(input$confirm_delete_pipeline, {
+        current <- saved_pipelines()
+        current[[pipeline_to_delete]] <- NULL
+        saved_pipelines(current)
+        save_all_data()
+        showNotification(paste("Recipe", pipeline_to_delete, "deleted"), type = "message")
+        add_to_log(paste("Deleted recipe:", pipeline_to_delete))
+        removeModal()
+      }, once = TRUE)
+    }
+  })
+  
+  # Apply Loaded Recipe button - APPLIES the loaded steps to ORIGINAL data
+  observeEvent(input$apply_loaded_recipe_btn, {
+    steps <- pipeline_steps()
+    
+    if(length(steps) == 0) {
+      showNotification("No recipe loaded. Load a recipe first.", type = "warning")
+      return()
+    }
+    
+    # IMPORTANT: Reset to original data before applying
+    data <- standardize_missing(df)
+    
+    if(is.null(data) || nrow(data) == 0) {
+      showNotification("No data available. Please check your data source.", type = "error")
+      return()
+    }
+    
+    original_rows <- nrow(data)
+    original_cols <- ncol(data)
+    
+    add_to_log(paste("=== Applying loaded recipe with", length(steps), "steps to ORIGINAL data ==="))
+    
+    data <- tryCatch({
+      apply_steps_to_data(data, steps)
+    }, error = function(e) {
+      add_to_log(paste("ERROR applying recipe:", e$message))
+      showNotification(paste("Error applying recipe:", e$message), type = "error", duration = 8)
+      return(NULL)
+    })
+    
+    if(is.null(data)) {
+      return()
+    }
+    
+    processed_data_working(data)
+    
+    add_to_log(paste("=== Recipe complete: from", original_rows, "rows to", nrow(data), 
+                     "rows, from", original_cols, "cols to", ncol(data), "cols ==="))
+    
+    showNotification(paste("✓ Recipe applied successfully!", nrow(data), "rows,", ncol(data), "columns"), 
+                     type = "message", duration = 5)
+    
+    # Auto-save processed data
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    ds_name <- paste0("Processed_", timestamp)
+    
+    current_datasets <- saved_datasets()
+    current_datasets[[ds_name]] <- list(
+      data = data, 
+      name = ds_name, 
+      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      rows = nrow(data), 
+      cols = ncol(data), 
+      comments = paste("Processed using recipe:", if(!is.null(input$pipeline_name) && input$pipeline_name != "") input$pipeline_name else "Recipe Builder")
+    )
+    saved_datasets(current_datasets)
+    save_all_data()
+    
+    updatePickerInput(session, "model_dataset_select", 
+                      choices = names(saved_datasets()), 
+                      selected = ds_name)
+    
+    add_to_log(paste("Auto-saved processed data as:", ds_name))
+  })
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 9: UI OUTPUTS FOR RECIPE BUILDER
+  # ========================================================================
+  # ========================================================================
+  
+  output$saved_pipelines_list <- renderUI({
+    pipelines <- saved_pipelines()
+    if(length(pipelines) == 0) {
+      return(div(class = "alert alert-info", "No saved recipes yet. Build one and save it above."))
+    }
+    tagList(lapply(names(pipelines), function(name) {
+      pipeline <- pipelines[[name]]
+      steps_count <- length(pipeline$steps)
+      comments_html <- if(!is.null(pipeline$comments) && pipeline$comments != "") {
+        tags$div(style = "font-size: 10px; color: #666; margin-top: 4px;", icon("comment"), " ", pipeline$comments)
+      } else { NULL }
+      created_time <- if(!is.null(pipeline$created)) format(pipeline$created, "%Y-%m-%d %H:%M") else "Unknown date"
+      div(class = "well", style = "padding: 8px; margin-bottom: 8px;",
+          div(style = "display: flex; justify-content: space-between; align-items: center;",
+              div(strong(name, style = "color: #2C3E50;"), br(),
+                  tags$small(paste(steps_count, "steps |", created_time)), comments_html),
+              div(actionButton(paste0("load_pipeline_", gsub(" ", "_", name)), label = "Load", class = "btn-primary btn-xs",
+                               style = "margin-right: 5px;", onclick = paste0("Shiny.setInputValue('load_pipeline_trigger', '", name, "', {priority: 'event'})")),
+                  actionButton(paste0("delete_pipeline_", gsub(" ", "_", name)), label = "Delete", class = "btn-danger btn-xs",
+                               onclick = paste0("Shiny.setInputValue('delete_pipeline_trigger', '", name, "', {priority: 'event'})"))))
+      )
+    }))
+  })
+  
+  output$saved_datasets_list <- renderUI({
+    datasets <- saved_datasets()
+    if(length(datasets) == 0) {
+      return(div(class = "alert alert-info", "No saved datasets yet. Process data and save one above."))
+    }
+    tagList(lapply(names(datasets), function(name) {
+      ds <- datasets[[name]]
+      comments_html <- if(!is.null(ds$comments) && ds$comments != "") {
+        tags$div(style = "font-size: 10px; color: #666; margin-top: 4px;", icon("comment"), " ", ds$comments)
+      } else { NULL }
+      div(class = "well", style = "padding: 8px; margin-bottom: 8px;",
+          div(style = "display: flex; justify-content: space-between; align-items: center;",
+              div(strong(name, style = "color: #2C3E50;"), br(),
+                  tags$small(paste(ds$rows, "rows,", ds$cols, "cols |", ds$timestamp)), comments_html),
+              actionButton(paste0("load_dataset_", gsub(" ", "_", name)), 
+                           label = "Load for Modeling", 
+                           class = "btn-primary btn-xs",
+                           onclick = paste0("Shiny.setInputValue('load_dataset_trigger', '", name, "', {priority: 'event'})")))
+      )
+    }))
+  })
+  
+  output$pipeline_summary_ui <- renderUI({
+    steps <- pipeline_steps()
+    if(!is.list(steps) || length(steps) == 0) {
+      return(p(icon("info-circle"), " No steps added yet. Click 'Add Step' to begin.", style = "color: grey;"))
+    }
+    step_elements <- list()
+    for(i in seq_along(steps)) {
+      step <- steps[[i]]
+      method_name <- method_display_names[[step$method]] %||% (step$method %||% "Not selected")
+      context <- ""
+      if(!is.null(step$cols) && length(step$cols) > 0) {
+        context <- paste0(" (", length(step$cols), " vars)")
+      }
+      if(step$method == "remove_na_rows" && !is.null(step$additional_info)) {
+        context <- paste0(context, " | threshold = ", step$additional_info, " missing")
+      }
+      if(step$method == "remove_na_cols" && !is.null(step$additional_info)) {
+        context <- paste0(context, " | threshold = ", step$additional_info, "%")
+      }
+      if(is.null(step$method) || step$method == "") {
+        method_name <- "⚠️ No method selected"
+      }
+      step_elements <- append(step_elements, list(
+        div(style = "display: flex; align-items: center; margin-bottom: 10px; padding: 8px; border-bottom: 1px solid #eee; background-color: #f8f9fa; border-radius: 4px;",
+            div(style = "width: 35px; font-weight: bold; color: #2C3E50;", paste0(i, ".")),
+            div(style = "flex: 1;", span(style = "font-weight: 500;", method_name), span(style = "color: #666; font-size: 12px; margin-left: 5px;", context)))
+      ))
+    }
+    tagList(step_elements)
+  })
+  
+  output$proc_data_summary_recipe <- renderPrint({
+    data <- processed_data_working()
+    total_missing <- sum(is.na(data))
+    total_cells <- nrow(data) * ncol(data)
+    missing_pct <- round(100 * total_missing / total_cells, 2)
+    cat("Current Data Summary\n====================\n\n")
+    cat("Observations:", nrow(data), "of", nrow(df), "\n")
+    cat("Variables:", ncol(data), "of", ncol(df), "\n")
+    cat("Missing values (R NA):", total_missing, "\n")
+    cat("Missing %:", missing_pct, "%\n\n")
+    cat("Variables with missing values:\n")
+    missing_by_var <- colSums(is.na(data))
+    missing_by_var <- missing_by_var[missing_by_var > 0]
+    if(length(missing_by_var) > 0) {
+      for(i in seq_along(missing_by_var)) {
+        pct <- round(100 * missing_by_var[i] / nrow(data), 1)
+        cat("  ", names(missing_by_var)[i], ":", missing_by_var[i], "missing (", pct, "%)\n")
+      }
+    } else {
+      cat("  No missing values in any variable!\n")
+    }
+  })
+  
+  output$proc_data_preview_recipe <- renderDT({
+    data <- processed_data_working()
+    datatable(head(data, 20), options = list(scrollX = TRUE, pageLength = 10, dom = 't'), rownames = FALSE)
+  })
+  
+  output$proc_log_recipe <- renderPrint({
+    log_entries <- processing_log()
+    if(length(log_entries) == 0) {
+      cat("No processing actions yet.\nBuild a recipe and click 'Apply Recipe' to see results.")
+    } else {
+      recent_log <- tail(log_entries, 30)
+      cat(paste(recent_log, collapse = "\n"))
+    }
+  })
+  
+  output$proc_download_data_recipe <- downloadHandler(
+    filename = function() { paste("processed_data_", Sys.Date(), ".csv", sep = "") },
+    content = function(file) { write.csv(processed_data_working(), file, row.names = FALSE) }
+  )
+  
+  # Load dataset for modeling
+  observeEvent(input$load_dataset_trigger, {
+    ds_name <- input$load_dataset_trigger
+    if(!is.null(ds_name) && ds_name != "" && ds_name %in% names(saved_datasets())) {
+      saved_ds <- saved_datasets()[[ds_name]]
+      if(is.list(saved_ds) && !is.null(saved_ds$data)) {
+        processed_data_working(saved_ds$data)
+        selected_model_dataset(ds_name)
+        updateRadioButtons(session, "model_data_source", selected = "saved")
+        updatePickerInput(session, "model_dataset_select", choices = names(saved_datasets()), selected = ds_name)
+        comments_msg <- if(!is.null(saved_ds$comments) && saved_ds$comments != "") paste0(" - Notes: ", saved_ds$comments) else ""
+        showNotification(paste("Loaded dataset:", ds_name, "(", saved_ds$rows, "rows,", saved_ds$cols, "cols)", comments_msg), type = "message")
+        add_to_log(paste("Loaded saved dataset:", ds_name, comments_msg))
+      } else {
+        showNotification(paste("Dataset", ds_name, "has invalid structure"), type = "error")
+      }
+    }
+  })
+  
   
   # ============================================================================
   # ============================================================================
-  # SECTION 5: TAB 1 - SUMMARY & EDA OUTPUTS
+  # SECTION 10: TAB 1 - SUMMARY & EDA OUTPUTS
   # ============================================================================
   # ============================================================================
   
@@ -897,28 +1955,65 @@ server <- function(input, output, session) {
   # Boxplot Analysis
   # ============================================================================
   
+  # UI for boxplot categorical filters
+  output$boxplot_cat_filters_ui <- renderUI({
+    req(input$boxplot_filter_vars)
+    
+    filter_ui_list <- list()
+    
+    for(var in input$boxplot_filter_vars) {
+      if(var %in% names(df)) {
+        vals <- as.character(df[[var]])
+        unique_vals <- sort(unique(vals))
+        
+        if(any(is.na(vals))) {
+          unique_vals <- c(unique_vals[!is.na(unique_vals)], "NA")
+        }
+        
+        filter_ui_list <- append(filter_ui_list, list(
+          div(style = "margin-top: 10px; margin-bottom: 10px;",
+              h5(paste(var, ":"), style = "margin-bottom: 5px; font-size: 13px;"),
+              checkboxGroupInput(
+                inputId = paste0("boxplot_filter_", var),
+                label = NULL,
+                choices = unique_vals,
+                selected = unique_vals,
+                inline = FALSE
+              )
+          )
+        ))
+      }
+    }
+    
+    if(length(filter_ui_list) == 0) {
+      return(p("No categorical variables selected", style = "color: #666; font-size: 12px;"))
+    }
+    
+    tagList(filter_ui_list)
+  })
+  
   filtered_boxplot_data <- reactive({
     data <- df
+    
     if(!is.null(input$boxplot_filter_vars) && length(input$boxplot_filter_vars) > 0) {
       for(var in input$boxplot_filter_vars) {
-        sel <- input[[paste0("boxplot_filter_", var)]]
-        if(!is.null(sel) && length(sel) > 0) {
-          if("NA" %in% sel) {
-            sel_real <- setdiff(sel, "NA")
-            if(input$include_null_boxplot) {
-              data <- data[data[[var]] %in% sel_real | is.na(data[[var]]), ]
+        selected_vals <- input[[paste0("boxplot_filter_", var)]]
+        
+        if(!is.null(selected_vals) && length(selected_vals) > 0) {
+          if("NA" %in% selected_vals) {
+            selected_vals_real <- setdiff(selected_vals, "NA")
+            if(length(selected_vals_real) > 0) {
+              data <- data[data[[var]] %in% selected_vals_real | is.na(data[[var]]), ]
             } else {
-              data <- data[data[[var]] %in% sel_real, ]
+              data <- data[is.na(data[[var]]), ]
             }
           } else {
-            data <- data[data[[var]] %in% sel, ]
-            if(!input$include_null_boxplot) {
-              data <- data[!is.na(data[[var]]), ]
-            }
+            data <- data[data[[var]] %in% selected_vals, ]
           }
         }
       }
     }
+    
     return(data)
   })
   
@@ -1091,6 +2186,12 @@ server <- function(input, output, session) {
     cat("  Observations shown:", nrow(data), "of", nrow(df), "\n")
     if(!is.null(input$boxplot_filter_vars) && length(input$boxplot_filter_vars) > 0) {
       cat("  Categorical filters applied:", paste(input$boxplot_filter_vars, collapse = ", "), "\n")
+      for(var in input$boxplot_filter_vars) {
+        selected_vals <- input[[paste0("boxplot_filter_", var)]]
+        if(!is.null(selected_vals) && length(selected_vals) > 0) {
+          cat("    -", var, ":", paste(selected_vals, collapse = ", "), "\n")
+        }
+      }
     }
     cat("  NULL values:", if(input$include_null_boxplot) "included" else "excluded", "\n")
   })
@@ -1111,11 +2212,80 @@ server <- function(input, output, session) {
   # Correlation Analysis
   # ============================================================================
   
+  # UI for correlation categorical filters
+  output$corr_cat_filters_ui <- renderUI({
+    req(input$corr_categorical_vars)
+    
+    filter_ui_list <- list()
+    
+    for(var in input$corr_categorical_vars) {
+      if(var %in% names(df)) {
+        vals <- as.character(df[[var]])
+        unique_vals <- sort(unique(vals))
+        
+        if(any(is.na(vals))) {
+          unique_vals <- c(unique_vals[!is.na(unique_vals)], "NA")
+        }
+        
+        filter_ui_list <- append(filter_ui_list, list(
+          div(style = "margin-top: 10px; margin-bottom: 10px;",
+              h5(paste(var, ":"), style = "margin-bottom: 5px; font-size: 13px;"),
+              checkboxGroupInput(
+                inputId = paste0("corr_filter_", var),
+                label = NULL,
+                choices = unique_vals,
+                selected = unique_vals,
+                inline = FALSE
+              ),
+              checkboxInput(paste0("corr_include_null_", var), 
+                            "Include NULL values", 
+                            value = FALSE)
+          )
+        ))
+      }
+    }
+    
+    if(length(filter_ui_list) == 0) {
+      return(p("No categorical variables selected", style = "color: #666; font-size: 12px;"))
+    }
+    
+    tagList(filter_ui_list)
+  })
+  
   corr_filtered_data <- reactive({
     data <- df
+    
     if(!is.null(input$corr_categorical_vars) && length(input$corr_categorical_vars) > 0) {
-      data <- apply_categorical_filters(data, input$corr_categorical_vars, "corr_filter_", input$include_null_correlation)
+      for(var in input$corr_categorical_vars) {
+        selected_vals <- input[[paste0("corr_filter_", var)]]
+        include_null <- input[[paste0("corr_include_null_", var)]] %||% FALSE
+        
+        if(!is.null(selected_vals) && length(selected_vals) > 0) {
+          if("NA" %in% selected_vals) {
+            selected_vals_real <- setdiff(selected_vals, "NA")
+            if(length(selected_vals_real) > 0) {
+              if(include_null) {
+                data <- data[data[[var]] %in% selected_vals_real | is.na(data[[var]]), ]
+              } else {
+                data <- data[data[[var]] %in% selected_vals_real, ]
+              }
+            } else {
+              if(include_null) {
+                data <- data[is.na(data[[var]]), ]
+              } else {
+                data <- data[!is.na(data[[var]]), ]
+              }
+            }
+          } else {
+            data <- data[data[[var]] %in% selected_vals, ]
+            if(!include_null) {
+              data <- data[!is.na(data[[var]]), ]
+            }
+          }
+        }
+      }
     }
+    
     data
   })
   
@@ -1266,7 +2436,19 @@ server <- function(input, output, session) {
       if("dash" %in% input$corr_mv_types) cat("  -- values treated as missing\n")
       if("na_string" %in% input$corr_mv_types) cat("  'NA' strings treated as missing\n")
     }
-    cat("  NULL values in categorical filters:", if(input$include_null_correlation) "included" else "excluded", "\n")
+    cat("\nCategorical Filters Applied:\n----------------------------\n")
+    if(!is.null(input$corr_categorical_vars) && length(input$corr_categorical_vars) > 0) {
+      for(var in input$corr_categorical_vars) {
+        selected_vals <- input[[paste0("corr_filter_", var)]]
+        include_null <- input[[paste0("corr_include_null_", var)]] %||% FALSE
+        if(!is.null(selected_vals) && length(selected_vals) > 0) {
+          cat("  ", var, ":", paste(selected_vals, collapse = ", "))
+          if(include_null) cat(" (NULLs included)\n") else cat("\n")
+        }
+      }
+    } else {
+      cat("  No categorical filters applied\n")
+    }
   })
   
   output$corr_obs_count <- renderText({
@@ -1289,8 +2471,7 @@ server <- function(input, output, session) {
     }
     complete_cases <- sum(complete.cases(num_data))
     rows_with_na <- nrow(num_data) - complete_cases
-    null_status <- if(input$include_null_correlation) "Categorical NULLs included" else "Categorical NULLs excluded"
-    paste("Showing", nrow(data), "of", nrow(df), "observations |", null_status, "|",
+    paste("Showing", nrow(data), "of", nrow(df), "observations |",
           "Complete cases for correlation:", complete_cases, if(rows_with_na > 0) paste("| Rows with NAs:", rows_with_na) else "")
   })
   
@@ -1304,7 +2485,6 @@ server <- function(input, output, session) {
     updatePickerInput(session, "corr_numeric_vars", selected = numeric_cols)
     updatePickerInput(session, "corr_categorical_vars", selected = NULL)
     updateCheckboxGroupInput(session, "corr_mv_types", selected = c("neg99", "dash", "na_string"))
-    updateCheckboxInput(session, "include_null_correlation", value = FALSE)
     showNotification("Correlation settings reset to defaults", type = "default")
   })
   
@@ -1313,6 +2493,9 @@ server <- function(input, output, session) {
   # Rising Values
   # ============================================================================
   
+  # UI for rising values categorical filters (already exists as rv_categorical_filters)
+  # This is the dynamic UI that appears when categorical variables are selected
+  
   rv_filtered_data <- reactive({
     req(input$rv_numeric_vars, length(input$rv_numeric_vars) > 0)
     data <- df
@@ -1320,6 +2503,8 @@ server <- function(input, output, session) {
     treat_neg99 <- safe_in("neg99", input$rv_mv_types)
     treat_dash <- !is.null(input$rv_mv_types) && "dash" %in% input$rv_mv_types
     treat_na_string <- !is.null(input$rv_mv_types) && "na_string" %in% input$rv_mv_types
+    
+    # Convert numeric columns
     for(col in names(data)) {
       if(col %in% numeric_cols && is.character(data[[col]])) {
         temp_vals <- data[[col]]
@@ -1329,6 +2514,8 @@ server <- function(input, output, session) {
         data[[col]] <- suppressWarnings(as.numeric(temp_vals))
       }
     }
+    
+    # Apply categorical filters
     if(!is.null(input$rv_categorical_vars) && length(input$rv_categorical_vars) > 0) {
       for(var in input$rv_categorical_vars) {
         selected_vals <- input[[paste0("rv_filter_", var)]]
@@ -1347,9 +2534,11 @@ server <- function(input, output, session) {
         }
       }
     }
+    
     data[, input$rv_numeric_vars, drop = FALSE]
   })
   
+  # Update checkboxes when categorical variables are selected
   observeEvent(input$rv_categorical_vars, {
     req(input$rv_categorical_vars)
     for(var in input$rv_categorical_vars) {
@@ -1361,6 +2550,43 @@ server <- function(input, output, session) {
                                selected = choices)
     }
   }, ignoreNULL = TRUE, ignoreInit = FALSE)
+  
+  # UI for rising values categorical filters
+  output$rv_categorical_filters <- renderUI({
+    req(input$rv_categorical_vars)
+    
+    filter_ui_list <- list()
+    
+    for(var in input$rv_categorical_vars) {
+      if(var %in% names(df)) {
+        vals <- as.character(df[[var]])
+        unique_vals <- sort(unique(vals))
+        
+        if(any(is.na(vals))) {
+          unique_vals <- c(unique_vals[!is.na(unique_vals)], "NA")
+        }
+        
+        filter_ui_list <- append(filter_ui_list, list(
+          div(style = "margin-top: 10px; margin-bottom: 10px;",
+              h5(paste(var, ":"), style = "margin-bottom: 5px; font-size: 13px;"),
+              checkboxGroupInput(
+                inputId = paste0("rv_filter_", var),
+                label = NULL,
+                choices = unique_vals,
+                selected = unique_vals,
+                inline = FALSE
+              )
+          )
+        ))
+      }
+    }
+    
+    if(length(filter_ui_list) == 0) {
+      return(p("No categorical variables selected", style = "color: #666; font-size: 12px;"))
+    }
+    
+    tagList(filter_ui_list)
+  })
   
   output$rising_plot <- renderPlotly({
     data <- rv_filtered_data()
@@ -1425,6 +2651,17 @@ server <- function(input, output, session) {
     cat("Variables with valid data:", sum(sapply(data, function(x) sum(!is.na(x)) > 0)), "\n")
     cat("NULL handling:", null_status, "\n\nVariable details:\n")
     for(var in names(data)) { cat("  ", var, ":", sum(!is.na(data[[var]])), "valid values\n") }
+    cat("\nCategorical Filters Applied:\n----------------------------\n")
+    if(!is.null(input$rv_categorical_vars) && length(input$rv_categorical_vars) > 0) {
+      for(var in input$rv_categorical_vars) {
+        selected_vals <- input[[paste0("rv_filter_", var)]]
+        if(!is.null(selected_vals) && length(selected_vals) > 0) {
+          cat("  ", var, ":", paste(selected_vals, collapse = ", "), "\n")
+        }
+      }
+    } else {
+      cat("  No categorical filters applied\n")
+    }
   })
   
   observeEvent(input$reset_rising, {
@@ -1806,7 +3043,7 @@ server <- function(input, output, session) {
       plot_df <- plot_df[!is.na(plot_df$value), ]
       req(nrow(plot_df) > 0)
       p <- ggplot(plot_df, aes(x = value)) +
-        geom_histogram(bins = input$dist_bins, fill = "#ADD8E6", color = "white", alpha = 0.7,
+        geom_histogram(bins = input$dist_bins, fill = "#13D4D4", color = "white", alpha = 0.7,
                        aes(text = paste0("Range: ", round(after_stat(xmin), 2), " to ", round(after_stat(xmax), 2),
                                          "<br>Count: ", after_stat(count),
                                          "<br>Percentage: ", round(after_stat(count / sum(count) * 100), 1), "%"))) +
@@ -1918,7 +3155,7 @@ server <- function(input, output, session) {
     } else {
       p <- ggplot(plot_df, aes(x = x, y = y, text = paste("Code:", code, "<br>", x_var, ":", round(x, 2),
                                                           "<br>", y_var, ":", round(y, 2)))) +
-        geom_point(alpha = 0.6, size = 2, color = "#48b1d4")
+        geom_point(alpha = 0.6, size = 2, color = "#13D4D4")
     }
     p <- p + labs(title = paste(y_var, "vs", x_var), x = x_var, y = y_var) +
       theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"))
@@ -2357,23 +3594,26 @@ server <- function(input, output, session) {
     
     color_matrix <- matrix("#ADD8E6", nrow = n_obs, ncol = n_vars)
     colnames(color_matrix) <- names(plot_df)
-    has_neg99 <- FALSE; has_dash <- FALSE; has_na_string <- FALSE; has_r_na <- FALSE
+    has_neg99 <- FALSE
+    has_dash <- FALSE
+    has_na_string <- FALSE
+    has_r_na <- FALSE
     
     for(i in 1:n_obs) {
       for(j in 1:n_vars) {
         val <- plot_df[i, j]
         if(!is.na(val) && val == "-99") {
           has_neg99 <- TRUE
-          if(show_neg99) color_matrix[i, j] <- "#FF69B4"
+          if(show_neg99) color_matrix[i, j] <- "#FF69B4"  # Hot pink for -99
         } else if(!is.na(val) && val == "--") {
           has_dash <- TRUE
-          if(show_dash) color_matrix[i, j] <- "#32CD32"
+          if(show_dash) color_matrix[i, j] <- "#32CD32"   # Lime green for --
         } else if(!is.na(val) && val == "NA") {
           has_na_string <- TRUE
-          if(show_na_string) color_matrix[i, j] <- "#FF0000"
+          if(show_na_string) color_matrix[i, j] <- "#FF0000"  # Red for "NA" string
         } else if(is.na(val)) {
           has_r_na <- TRUE
-          color_matrix[i, j] <- "#808080"
+          color_matrix[i, j] <- "#808080"  # Gray for R NA
         }
       }
     }
@@ -2429,6 +3669,61 @@ server <- function(input, output, session) {
       ticktext <- 1:n_obs
     }
     
+    # Create color legend/key annotations
+    legend_items <- 1  # Start with "Present"
+    legend_colors <- list(Present = "#ADD8E6", Neg99 = "#FF69B4", Dash = "#32CD32", NA_String = "#FF0000", R_NA = "#808080")
+    
+    if(has_neg99 && show_neg99) legend_items <- legend_items + 1
+    if(has_dash && show_dash) legend_items <- legend_items + 1
+    if(has_na_string && show_na_string) legend_items <- legend_items + 1
+    if(has_r_na) legend_items <- legend_items + 1
+    
+    total_width <- 0.8
+    start_x <- 0.15
+    spacing <- total_width / legend_items
+    
+    # Build the legend annotations
+    key_annotations <- list(
+      list(x = 0.5, y = 1.12, text = "Missingness Visualisation:", showarrow = FALSE,
+           xref = "paper", yref = "paper", font = list(size = 16, color = "#2C3E50", weight = "bold"))
+    )
+    
+    current_x <- start_x
+    key_annotations <- append(key_annotations, list(
+      list(x = current_x, y = 1.06, text = "Present", showarrow = FALSE,
+           xref = "paper", yref = "paper", font = list(color = legend_colors$Present, size = 12, weight = "bold"))
+    ))
+    current_x <- current_x + spacing
+    
+    if(has_neg99 && show_neg99) {
+      key_annotations <- append(key_annotations, list(
+        list(x = current_x, y = 1.06, text = "-99", showarrow = FALSE,
+             xref = "paper", yref = "paper", font = list(color = legend_colors$Neg99, size = 12, weight = "bold"))
+      ))
+      current_x <- current_x + spacing
+    }
+    if(has_dash && show_dash) {
+      key_annotations <- append(key_annotations, list(
+        list(x = current_x, y = 1.06, text = "--", showarrow = FALSE,
+             xref = "paper", yref = "paper", font = list(color = legend_colors$Dash, size = 12, weight = "bold"))
+      ))
+      current_x <- current_x + spacing
+    }
+    if(has_na_string && show_na_string) {
+      key_annotations <- append(key_annotations, list(
+        list(x = current_x, y = 1.06, text = "NA string", showarrow = FALSE,
+             xref = "paper", yref = "paper", font = list(color = legend_colors$NA_String, size = 12, weight = "bold"))
+      ))
+      current_x <- current_x + spacing
+    }
+    if(has_r_na) {
+      key_annotations <- append(key_annotations, list(
+        list(x = current_x, y = 1.06, text = "R NA", showarrow = FALSE,
+             xref = "paper", yref = "paper", font = list(color = legend_colors$R_NA, size = 12, weight = "bold"))
+      ))
+    }
+    
+    # Create the heatmap with color scale
     unique_colors <- unique(as.vector(color_matrix))
     if(length(unique_colors) == 0) unique_colors <- "#ADD8E6"
     color_scale <- list()
@@ -2442,6 +3737,7 @@ server <- function(input, output, session) {
             colorscale = color_scale, text = hover_text, hoverinfo = "text", 
             showscale = FALSE) %>%
       layout(
+        annotations = key_annotations,
         title = list(text = paste("Missing Values Heatmap -", n_obs, "Observations,", n_vars, "Variables"), 
                      font = list(size = 16), y = 0.98),
         xaxis = list(title = "Variables", tickangle = -45,
@@ -2699,6 +3995,9 @@ server <- function(input, output, session) {
   
   
   create_missingness_data <- function(data, target_var, predictor_vars, missing_types) {
+    # Remove CODE from predictors if it's there
+    predictor_vars <- predictor_vars[predictor_vars != "CODE"]
+    
     valid_predictors <- predictor_vars[predictor_vars %in% names(data)]
     valid_predictors <- valid_predictors[valid_predictors != target_var]
     if(length(valid_predictors) == 0) {
@@ -2711,7 +4010,6 @@ server <- function(input, output, session) {
     target_vals <- as.character(result_data[[target_var]])
     target_missing <- rep(FALSE, nrow(result_data))
     
-    # FIXED: Each if statement needs its body
     if(!is.null(missing_types) && "neg99" %in% missing_types) target_missing <- target_missing | (target_vals == "-99")
     if("dash" %in% missing_types) target_missing <- target_missing | (target_vals == "--")
     if("na_string" %in% missing_types) target_missing <- target_missing | (target_vals == "NA")
@@ -3270,7 +4568,7 @@ server <- function(input, output, session) {
                                           "<br>Outlier:", IsOutlier))) +
       geom_point(size = 2, alpha = 0.7) +
       geom_hline(yintercept = maha_result$threshold, linetype = "dashed", color = "red", alpha = 0.7) +
-      scale_color_manual(values = c("FALSE" = "#ADD8E6", "TRUE" = "#e74c3c")) +
+      scale_color_manual(values = c("FALSE" = "#13D4D4", "TRUE" = "#e74c3c")) +
       labs(title = "Mahalanobis Distance",
            subtitle = paste("Threshold (χ²):", round(maha_result$threshold, 3),
                             "| Outliers:", sum(maha_result$is_outlier)),
@@ -3314,7 +4612,7 @@ server <- function(input, output, session) {
                                           "<br>Outlier:", IsOutlier))) +
       geom_point(size = 2, alpha = 0.7) +
       geom_hline(yintercept = cooks_result$threshold, linetype = "dashed", color = "red", alpha = 0.7) +
-      scale_color_manual(values = c("FALSE" = "#ADD8E6", "TRUE" = "#e74c3c")) +
+      scale_color_manual(values = c("FALSE" = "#13D4D4", "TRUE" = "#e74c3c")) +
       labs(title = "Cook's Distance",
            subtitle = paste("Threshold:", round(cooks_result$threshold, 4),
                             "| Outliers:", sum(cooks_result$is_outlier)),
@@ -3358,7 +4656,7 @@ server <- function(input, output, session) {
                                           "<br>Outlier:", IsOutlier))) +
       geom_point(size = 2, alpha = 0.7) +
       geom_hline(yintercept = lof_result$threshold, linetype = "dashed", color = "red", alpha = 0.7) +
-      scale_color_manual(values = c("FALSE" = "#ADD8E6", "TRUE" = "#e74c3c")) +
+      scale_color_manual(values = c("FALSE" = "#13D4D4", "TRUE" = "#e74c3c")) +
       labs(title = "Local Outlier Factor (LOF)",
            subtitle = paste("Threshold:", lof_result$threshold,
                             "| Outliers:", sum(lof_result$is_outlier),
@@ -3403,7 +4701,7 @@ server <- function(input, output, session) {
                                           "<br>Outlier:", IsOutlier))) +
       geom_point(size = 2, alpha = 0.7) +
       geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.7) +
-      scale_color_manual(values = c("FALSE" = "#ADD8E6", "TRUE" = "#e74c3c")) +
+      scale_color_manual(values = c("FALSE" = "#13D4D4", "TRUE" = "#e74c3c")) +
       labs(title = "One-Class SVM",
            subtitle = paste("nu =", svm_result$nu, "| kernel =", svm_result$kernel,
                             "| Outliers:", sum(svm_result$is_outlier)),
@@ -3448,7 +4746,7 @@ server <- function(input, output, session) {
       geom_point(size = 2, alpha = 0.7) +
       geom_hline(yintercept = rf_result$threshold_lower, linetype = "dashed", color = "red", alpha = 0.7) +
       geom_hline(yintercept = rf_result$threshold_upper, linetype = "dashed", color = "red", alpha = 0.7) +
-      scale_color_manual(values = c("FALSE" = "#ADD8E6", "TRUE" = "#e74c3c")) +
+      scale_color_manual(values = c("FALSE" = "#13D4D4", "TRUE" = "#e74c3c")) +
       labs(title = "Random Forest Residuals",
            subtitle = paste("IQR Multiplier:", rf_result$iqr_multiplier,
                             "| Outliers:", sum(rf_result$is_outlier)),
@@ -3492,7 +4790,7 @@ server <- function(input, output, session) {
                                           "<br>Outlier:", IsOutlier))) +
       geom_point(size = 2, alpha = 0.7) +
       geom_hline(yintercept = if_result$threshold, linetype = "dashed", color = "red", alpha = 0.7) +
-      scale_color_manual(values = c("FALSE" = "#ADD8E6", "TRUE" = "#e74c3c")) +
+      scale_color_manual(values = c("FALSE" = "#13D4D4", "TRUE" = "#e74c3c")) +
       labs(title = "Isolation Forest",
            subtitle = paste("Threshold:", if_result$threshold,
                             "| Outliers:", sum(if_result$is_outlier)),
@@ -3504,7 +4802,14 @@ server <- function(input, output, session) {
     ggplotly(p, tooltip = "text") %>% layout(hoverlabel = list(bgcolor = "white"))
   })
   
-  # Statistics outputs for each method (optional but nice to have)
+  
+  
+  
+  # ============================================================================
+  # OUTLIER STATISTICS OUTPUTS WITH COLLAPSIBLE SECTIONS
+  # ============================================================================
+  
+  # Mahalanobis Distance Statistics (Collapsible)
   output$outlier_mahalanobis_stats <- renderPrint({
     results <- outlier_analysis_reactive()
     if(is.null(results) || is.null(results$Mahalanobis)) {
@@ -3528,6 +4833,7 @@ server <- function(input, output, session) {
     }
   })
   
+  # Cook's Distance Statistics (Collapsible)
   output$outlier_cooks_stats <- renderPrint({
     results <- outlier_analysis_reactive()
     if(is.null(results) || is.null(results$Cooks)) {
@@ -3551,6 +4857,7 @@ server <- function(input, output, session) {
     }
   })
   
+  # Local Outlier Factor Statistics (Collapsible)
   output$outlier_lof_stats <- renderPrint({
     results <- outlier_analysis_reactive()
     if(is.null(results) || is.null(results$LOF)) {
@@ -3574,6 +4881,7 @@ server <- function(input, output, session) {
     }
   })
   
+  # One-Class SVM Statistics (Collapsible)
   output$outlier_svm_stats <- renderPrint({
     results <- outlier_analysis_reactive()
     if(is.null(results) || is.null(results$SVM)) {
@@ -3590,6 +4898,7 @@ server <- function(input, output, session) {
     cat("Outlier percentage:", round(100 * sum(svm$is_outlier) / svm$n_obs, 2), "%\n")
   })
   
+  # Random Forest Residuals Statistics (Collapsible)
   output$outlier_rf_stats <- renderPrint({
     results <- outlier_analysis_reactive()
     if(is.null(results) || is.null(results$RF_Residuals)) {
@@ -3616,6 +4925,7 @@ server <- function(input, output, session) {
     }
   })
   
+  # Isolation Forest Statistics (Collapsible)
   output$outlier_if_stats <- renderPrint({
     results <- outlier_analysis_reactive()
     if(is.null(results) || is.null(results$IForest)) {
@@ -3637,14 +4947,6 @@ server <- function(input, output, session) {
       }
     }
   })
-  
-  
-  
-  
-  
-  
-  
-  
   
   
   # Render the consensus table
@@ -3688,6 +4990,11 @@ server <- function(input, output, session) {
   
   
   
+  # ========================================================================
+  # ========================================================================
+  # SECTION 7: RECIPE BUILDER (Data Processing Controls - Tab 3)
+  # ========================================================================
+  # ========================================================================
   
   
   
@@ -3696,1858 +5003,394 @@ server <- function(input, output, session) {
   
   
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  # ============================================================================
-  # ============================================================================
-  # SECTION 7: DATA PROCESSING CONTROLS (Pipeline Builder)
-  # ============================================================================
-  # ============================================================================
-  
-  # ----------------------------------------------------------------------------
-  # 7.1 UI OUTPUTS - Pipeline Step Builder Interface
-  # ----------------------------------------------------------------------------
-  
-  output$processing_steps_ui <- renderUI({
-    steps <- pipeline_steps()
-    
-    # Validate steps is a list and not an atomic vector
-    if(!is.list(steps) || length(steps) == 0) {
-      return(div(class = "alert alert-info", 
-                 icon("info-circle"), 
-                 "No steps added yet. Click 'Add Step' to begin building your processing pipeline."))
-    }
-    
-    # Check if steps is a named list or has valid step objects
-    if(!is.list(steps[[1]])) {
-      # Reset pipeline_steps if it's corrupted
-      pipeline_steps(list())
-      return(div(class = "alert alert-warning", 
-                 icon("exclamation-triangle"), 
-                 "Pipeline data was corrupted. Please add steps again."))
-    }
-    
-    current_data <- processed_data_working()
-    numeric_cols_available <- names(current_data)[sapply(current_data, is.numeric)]
-    numeric_cols_available <- numeric_cols_available[!numeric_cols_available %in% c("CODE", "OBS_TYPE", "DEATH_RATE")]
-    
-    tagList(lapply(seq_along(steps), function(idx) {
-      step <- steps[[idx]]
-      
-      # Ensure step is a list
-      if(!is.list(step)) {
-        return(div(class = "alert alert-danger", "Invalid step configuration"))
-      }
-      
-      step_id <- step$id %||% idx
-      
-      # Safely extract numeric values from additional_info (which might be a list)
-      additional_info <- step$additional_info
-      na_row_threshold <- if(is.numeric(additional_info)) additional_info else 5
-      na_col_threshold <- if(is.numeric(additional_info)) additional_info else 50
-      knn_k <- if(is.numeric(additional_info)) additional_info else 5
-      manual_val <- if(is.numeric(additional_info)) additional_info else 0
-      bag_trees <- if(is.numeric(additional_info)) additional_info else 25
-      
-      div(class = "well", style = "padding: 10px; margin-bottom: 15px; background-color: #f9f9f9; border-left: 4px solid #2C3E50;",
-          div(style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;",
-              strong(paste("Step", idx), style = "color: #2C3E50;"),
-              actionButton(paste0("remove_step_btn_", step_id), 
-                           label = HTML('<i class="fa fa-trash"></i> Remove'), 
-                           class = "btn-danger btn-xs",
-                           onclick = paste0("Shiny.setInputValue('remove_step', ", step_id, ")"))
-          ),
-          
-          selectInput(paste0("step_method_", step_id), "Processing Method",
-                      choices = c("-- Select --" = "",
-                                  "Row Operations" = "---",
-                                  "Remove Rows with NAs" = "remove_na_rows",
-                                  "Remove Rows by Index" = "remove_rows_by_index",
-                                  "Keep Rows by Index" = "keep_rows_by_index",
-                                  "Remove Outliers (IQR)" = "remove_outliers_iqr",
-                                  "Remove Outliers (Mahalanobis)" = "remove_outliers_mahalanobis",
-                                  "Remove Outliers (Cook's Distance)" = "remove_outliers_cooks",
-                                  "Remove Outliers (LOF)" = "remove_outliers_lof",
-                                  "Remove Outliers (Isolation Forest)" = "remove_outliers_iforest",
-                                  "Column Operations" = "---",
-                                  "Remove Columns with NAs" = "remove_na_cols",
-                                  "Remove Columns by Name" = "remove_cols_by_name",
-                                  "Keep Columns by Name" = "keep_cols_by_name",
-                                  "Imputation" = "---",
-                                  "Impute — Median" = "impute_median",
-                                  "Impute — Mean" = "impute_mean",
-                                  "Impute — KNN" = "impute_knn",
-                                  "Impute — Manual Value" = "impute_manual",
-                                  "Impute — Bagged Trees" = "impute_bag",
-                                  "Transformations" = "---",
-                                  "Transform — Log" = "log_transform",
-                                  "Transform — Square Root" = "sqrt_transform",
-                                  "Transform — Yeo-Johnson" = "yeojohnson",
-                                  "Transform — Box-Cox" = "boxcox",
-                                  "Scale Data" = "scale",
-                                  "Center Data" = "center",
-                                  "Feature Selection" = "---",
-                                  "Remove Near-Zero Variance" = "nzv",
-                                  "Remove Linear Combinations" = "lincomb"),
-                      selected = step$method),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] != '' && 
-                             input['step_method_", step_id, "'] != 'remove_na_rows' && 
-                             input['step_method_", step_id, "'] != 'remove_na_cols' &&
-                             input['step_method_", step_id, "'] != 'nzv' &&
-                             input['step_method_", step_id, "'] != 'lincomb'"),
-            pickerInput(paste0("step_cols_", step_id), "Select Variables",
-                        choices = numeric_cols_available,
-                        selected = step$cols,
-                        multiple = TRUE,
-                        options = list(`actions-box` = TRUE, `live-search` = TRUE,
-                                       `selected-text-format` = "count > 3"))
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'impute_knn'"),
-            numericInput(paste0("step_knn_k_", step_id), "Number of Neighbors", 
-                         value = knn_k, min = 1, max = 20)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'impute_manual'"),
-            numericInput(paste0("step_manual_val_", step_id), "Imputation Value", 
-                         value = manual_val)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'impute_bag'"),
-            numericInput(paste0("step_bag_trees_", step_id), "Number of Trees", 
-                         value = bag_trees, min = 10, max = 100)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_na_rows'"),
-            sliderInput(paste0("step_na_row_threshold_", step_id), "Max Missing Values per Row",
-                        min = 0, max = 15, value = na_row_threshold, step = 1),
-            checkboxInput(paste0("step_na_row_apply_test_", step_id), "Apply to Test Data", 
-                          value = if(isTRUE(step$skip_test)) TRUE else FALSE)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_na_cols'"),
-            sliderInput(paste0("step_na_col_threshold_", step_id), "Max Missing % per Column",
-                        min = 0, max = 100, value = na_col_threshold, step = 5, post = "%")
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'lincomb'"),
-            div(class = "alert alert-warning", style = "padding: 5px; margin-top: 5px; font-size: 11px;",
-                icon("exclamation-triangle"), 
-                "Make sure all NA values have been addressed before adding this step")
-          ),
-          
-          # New conditional panels for manual operations and outlier removal
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_rows_by_index'"),
-            textAreaInput(paste0("step_row_indices_", step_id), "Row indices to remove (comma-separated, e.g., 1,5,10,25 or 1:10):",
-                          value = "", rows = 2, placeholder = "1, 5, 10, 25, 50"),
-            p("Specify row numbers to remove. Can be single numbers or ranges like 1:10.", 
-              style = "font-size: 11px; color: #666; margin-top: 5px;")
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'keep_rows_by_index'"),
-            textAreaInput(paste0("step_row_keep_indices_", step_id), "Row indices to keep (comma-separated, e.g., 1,5,10,25 or 1:10):",
-                          value = "", rows = 2, placeholder = "1, 5, 10, 25, 50"),
-            p("Specify row numbers to keep. All other rows will be removed.", 
-              style = "font-size: 11px; color: #666; margin-top: 5px;")
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_cols_by_name'"),
-            pickerInput(paste0("step_cols_remove_", step_id), "Select columns to remove:",
-                        choices = names(current_data),
-                        selected = NULL,
-                        multiple = TRUE,
-                        options = list(`actions-box` = TRUE, `live-search` = TRUE))
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'keep_cols_by_name'"),
-            pickerInput(paste0("step_cols_keep_", step_id), "Select columns to keep:",
-                        choices = names(current_data),
-                        selected = NULL,
-                        multiple = TRUE,
-                        options = list(`actions-box` = TRUE, `live-search` = TRUE)),
-            p("Note: CODE and OBS_TYPE are always kept automatically.", 
-              style = "font-size: 11px; color: #666; margin-top: 5px;")
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_iqr'"),
-            pickerInput(paste0("step_outlier_vars_", step_id), "Select variables for outlier detection:",
-                        choices = numeric_cols,
-                        selected = numeric_cols[1:min(3, length(numeric_cols))],
-                        multiple = TRUE,
-                        options = list(`actions-box` = TRUE, `live-search` = TRUE)),
-            sliderInput(paste0("step_outlier_iqr_mult_", step_id), "IQR Multiplier:",
-                        min = 1, max = 5, value = 1.5, step = 0.1)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_mahalanobis'"),
-            sliderInput(paste0("step_outlier_mahalanobis_prob_", step_id), "Chi-Square Probability Threshold:",
-                        min = 0.9, max = 0.9999, value = 0.999, step = 0.001)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_cooks'"),
-            selectInput(paste0("step_outlier_cooks_method_", step_id), "Threshold Method:",
-                        choices = c("4 * mean" = "4mean", "4/n" = "4n", "Quantile 0.99" = "quantile"),
-                        selected = "4mean")
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_lof'"),
-            sliderInput(paste0("step_outlier_lof_minpts_", step_id), "minPts (neighbors):",
-                        min = 3, max = 20, value = 5, step = 1),
-            sliderInput(paste0("step_outlier_lof_threshold_", step_id), "LOF Threshold:",
-                        min = 1, max = 5, value = 2, step = 0.1)
-          ),
-          
-          conditionalPanel(
-            condition = paste0("input['step_method_", step_id, "'] == 'remove_outliers_iforest'"),
-            sliderInput(paste0("step_outlier_if_threshold_", step_id), "Isolation Forest Threshold:",
-                        min = 0.5, max = 0.95, value = 0.6, step = 0.01)
-          )
-      )
-    }))
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.2 PIPELINE STEP MANAGEMENT - Add, Remove, and Update Steps
-  # ----------------------------------------------------------------------------
-  
-  # Add step observer
-  observeEvent(input$add_processing_step, {
-    current <- pipeline_steps()
-    id <- if(length(current) == 0) 1 else max(sapply(current, function(x) x$id)) + 1
-    
-    new_step <- list(
-      id = id,
-      method = "",
-      cols = character(0),
-      additional_info = NULL,
-      skip_test = FALSE
-    )
-    pipeline_steps(append(current, list(new_step)))
-    add_to_log(paste("Added pipeline step", id))
-  })
-  
-  
-  # Remove step observer
-  observeEvent(input$remove_step, {
-    step_to_remove <- as.numeric(input$remove_step)
-    current <- pipeline_steps()
-    if(step_to_remove <= length(current) && step_to_remove > 0) {
-      current <- current[-step_to_remove]
-      pipeline_steps(current)
-      add_to_log(paste("Removed pipeline step", step_to_remove))
-    }
-  })
-  
-  
-  # Update step parameters - SAFER VERSION with error handling for all new methods
-  observe({
-    steps <- pipeline_steps()
-    if(length(steps) == 0) return()
-    
-    updated <- FALSE
-    
-    for(i in seq_along(steps)) {
-      step_id <- steps[[i]]$id
-      
-      # Safely get method input
-      method_input <- tryCatch(input[[paste0("step_method_", step_id)]], error = function(e) NULL)
-      if(!is.null(method_input) && method_input != "") {
-        if(steps[[i]]$method != method_input) {
-          steps[[i]]$method <- method_input
-          updated <- TRUE
-        }
-      }
-      
-      # Safely get columns input (for imputation/transformation steps)
-      cols_input <- tryCatch(input[[paste0("step_cols_", step_id)]], error = function(e) NULL)
-      if(!is.null(cols_input)) {
-        if(!identical(steps[[i]]$cols, cols_input)) {
-          steps[[i]]$cols <- cols_input
-          updated <- TRUE
-        }
-      }
-      
-      # Safely handle additional info based on method
-      if(!is.null(steps[[i]]$method) && steps[[i]]$method != "") {
-        
-        # Existing methods
-        if(steps[[i]]$method == "impute_knn") {
-          val <- tryCatch(input[[paste0("step_knn_k_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) steps[[i]]$additional_info <- val
-        } else if(steps[[i]]$method == "impute_manual") {
-          val <- tryCatch(input[[paste0("step_manual_val_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) steps[[i]]$additional_info <- val
-        } else if(steps[[i]]$method == "impute_bag") {
-          val <- tryCatch(input[[paste0("step_bag_trees_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) steps[[i]]$additional_info <- val
-        } else if(steps[[i]]$method == "remove_na_rows") {
-          val <- tryCatch(input[[paste0("step_na_row_threshold_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) steps[[i]]$additional_info <- val
-          skip <- tryCatch(input[[paste0("step_na_row_apply_test_", step_id)]], error = function(e) FALSE)
-          steps[[i]]$skip_test <- if(!is.null(skip)) skip else FALSE
-        } else if(steps[[i]]$method == "remove_na_cols") {
-          val <- tryCatch(input[[paste0("step_na_col_threshold_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) steps[[i]]$additional_info <- val
-          
-          # New manual row/column operations
-        } else if(steps[[i]]$method == "remove_rows_by_index") {
-          val <- tryCatch(input[[paste0("step_row_indices_", step_id)]], error = function(e) NULL)
-          if(!is.null(val) && val != "") {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$indices <- val
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "keep_rows_by_index") {
-          val <- tryCatch(input[[paste0("step_row_keep_indices_", step_id)]], error = function(e) NULL)
-          if(!is.null(val) && val != "") {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$keep_indices <- val
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "remove_cols_by_name") {
-          val <- tryCatch(input[[paste0("step_cols_remove_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$remove_cols <- val
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "keep_cols_by_name") {
-          val <- tryCatch(input[[paste0("step_cols_keep_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$keep_cols <- val
-            updated <- TRUE
-          }
-          
-          # New outlier removal methods
-        } else if(steps[[i]]$method == "remove_outliers_iqr") {
-          vars <- tryCatch(input[[paste0("step_outlier_vars_", step_id)]], error = function(e) NULL)
-          mult <- tryCatch(input[[paste0("step_outlier_iqr_mult_", step_id)]], error = function(e) NULL)
-          if(!is.null(vars) || !is.null(mult)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            if(!is.null(vars)) steps[[i]]$additional_info$outlier_vars <- vars
-            if(!is.null(mult)) steps[[i]]$additional_info$iqr_multiplier <- mult
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "remove_outliers_mahalanobis") {
-          val <- tryCatch(input[[paste0("step_outlier_mahalanobis_prob_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$mahalanobis_prob <- val
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "remove_outliers_cooks") {
-          val <- tryCatch(input[[paste0("step_outlier_cooks_method_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$cooks_method <- val
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "remove_outliers_lof") {
-          minPts <- tryCatch(input[[paste0("step_outlier_lof_minpts_", step_id)]], error = function(e) NULL)
-          threshold <- tryCatch(input[[paste0("step_outlier_lof_threshold_", step_id)]], error = function(e) NULL)
-          if(!is.null(minPts) || !is.null(threshold)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            if(!is.null(minPts)) steps[[i]]$additional_info$lof_minpts <- minPts
-            if(!is.null(threshold)) steps[[i]]$additional_info$lof_threshold <- threshold
-            updated <- TRUE
-          }
-        } else if(steps[[i]]$method == "remove_outliers_iforest") {
-          val <- tryCatch(input[[paste0("step_outlier_if_threshold_", step_id)]], error = function(e) NULL)
-          if(!is.null(val)) {
-            if(is.null(steps[[i]]$additional_info)) steps[[i]]$additional_info <- list()
-            steps[[i]]$additional_info$if_threshold <- val
-            updated <- TRUE
-          }
-        }
-      }
-    }
-    
-    if(updated) pipeline_steps(steps)
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.3 PIPELINE EXECUTION - Apply Recipe Button (WITH ALL NEW STEP TYPES)
-  # ----------------------------------------------------------------------------
-  
-  # MAIN PIPELINE PROCESSING - Applies all steps in sequence
-  observeEvent(input$process_data_btn, {
-    steps <- pipeline_steps()
-    
-    # Debug output
-    cat("\n=== APPLYING PIPELINE ===\n")
-    cat("Number of steps:", length(steps), "\n")
-    
-    if(length(steps) == 0) {
-      showNotification("No steps in pipeline. Add steps first.", type = "warning")
-      return()
-    }
-    
-    # Start with current working data
-    data <- processed_data_working()
-    original_rows <- nrow(data)
-    original_cols <- ncol(data)
-    
-    add_to_log("=== Starting pipeline processing ===")
-    
-    # Apply each step in sequence
-    for(i in seq_along(steps)) {
-      step <- steps[[i]]
-      method <- step$method
-      
-      cat("Processing step", i, ":", method, "\n")
-      
-      if(is.null(method) || method == "") {
-        cat("  Skipping - no method selected\n")
-        next
-      }
-      
-      cols <- step$cols
-      
-      # ================================================================
-      # EXISTING STEP TYPES
-      # ================================================================
-      
-      if(method == "remove_na_rows") {
-        threshold <- step$additional_info %||% 5
-        before <- nrow(data)
-        row_na_count <- apply(data, 1, function(x) sum(is.na(x)))
-        data <- data[row_na_count <= threshold, ]
-        removed <- before - nrow(data)
-        add_to_log(paste("  Removed", removed, "rows with >", threshold, "missing values"))
-        cat("  Removed", removed, "rows\n")
-        
-      } else if(method == "remove_na_cols") {
-        threshold <- step$additional_info %||% 50
-        before <- ncol(data)
-        col_na_pct <- colMeans(is.na(data)) * 100
-        cols_to_keep <- names(col_na_pct)[col_na_pct <= threshold]
-        data <- data[, cols_to_keep, drop = FALSE]
-        removed <- before - ncol(data)
-        add_to_log(paste("  Removed", removed, "columns with >", threshold, "% missing values"))
-        cat("  Removed", removed, "columns\n")
-        
-      } else if(method == "impute_median" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            na_count <- sum(is.na(data[[col]]))
-            if(na_count > 0) {
-              data[[col]][is.na(data[[col]])] <- median(data[[col]], na.rm = TRUE)
-              add_to_log(paste("  Imputed", na_count, "values in", col, "with median"))
-            }
-          }
-        }
-        cat("  Median imputed", length(cols), "variables\n")
-        
-      } else if(method == "impute_mean" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            na_count <- sum(is.na(data[[col]]))
-            if(na_count > 0) {
-              data[[col]][is.na(data[[col]])] <- mean(data[[col]], na.rm = TRUE)
-              add_to_log(paste("  Imputed", na_count, "values in", col, "with mean"))
-            }
-          }
-        }
-        cat("  Mean imputed", length(cols), "variables\n")
-        
-      } else if(method == "impute_manual" && !is.null(cols) && length(cols) > 0) {
-        impute_val <- step$additional_info %||% 0
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            na_count <- sum(is.na(data[[col]]))
-            if(na_count > 0) {
-              data[[col]][is.na(data[[col]])] <- impute_val
-              add_to_log(paste("  Imputed", na_count, "values in", col, "with", impute_val))
-            }
-          }
-        }
-        cat("  Manually imputed", length(cols), "variables with", impute_val, "\n")
-        
-      } else if(method == "log_transform" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            min_val <- min(data[[col]], na.rm = TRUE)
-            if(min_val <= 0) {
-              data[[col]] <- log(data[[col]] + abs(min_val) + 1)
-            } else {
-              data[[col]] <- log(data[[col]])
-            }
-          }
-        }
-        add_to_log(paste("  Log transformed", length(cols), "variables"))
-        cat("  Log transformed", length(cols), "variables\n")
-        
-      } else if(method == "sqrt_transform" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            min_val <- min(data[[col]], na.rm = TRUE)
-            if(min_val < 0) {
-              data[[col]] <- sqrt(data[[col]] + abs(min_val) + 1)
-            } else {
-              data[[col]] <- sqrt(data[[col]])
-            }
-          }
-        }
-        add_to_log(paste("  Square root transformed", length(cols), "variables"))
-        cat("  Square root transformed", length(cols), "variables\n")
-        
-      } else if(method == "boxcox" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            min_val <- min(data[[col]], na.rm = TRUE)
-            if(min_val > 0 && requireNamespace("MASS", quietly = TRUE)) {
-              bc <- MASS::boxcox(data[[col]] ~ 1, plotit = FALSE)
-              lambda <- bc$x[which.max(bc$y)]
-              if(abs(lambda) < 0.01) {
-                data[[col]] <- log(data[[col]])
-              } else {
-                data[[col]] <- (data[[col]]^lambda - 1) / lambda
-              }
-              add_to_log(paste("  Box-Cox transformed", col, "with lambda =", round(lambda, 3)))
-            }
-          }
-        }
-        cat("  Box-Cox transformed", length(cols), "variables\n")
-        
-      } else if(method == "yeojohnson" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            if(requireNamespace("bestNormalize", quietly = TRUE)) {
-              yj <- bestNormalize::yeojohnson(data[[col]])
-              data[[col]] <- predict(yj, data[[col]])
-              add_to_log(paste("  Yeo-Johnson transformed", col, "with lambda =", round(yj$lambda, 3)))
-            }
-          }
-        }
-        cat("  Yeo-Johnson transformed", length(cols), "variables\n")
-        
-      } else if(method == "scale" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            data[[col]] <- scale(data[[col]])
-          }
-        }
-        add_to_log(paste("  Scaled", length(cols), "variables"))
-        cat("  Scaled", length(cols), "variables\n")
-        
-      } else if(method == "center" && !is.null(cols) && length(cols) > 0) {
-        for(col in cols) {
-          if(col %in% names(data) && is.numeric(data[[col]])) {
-            data[[col]] <- data[[col]] - mean(data[[col]], na.rm = TRUE)
-          }
-        }
-        add_to_log(paste("  Centered", length(cols), "variables"))
-        cat("  Centered", length(cols), "variables\n")
-        
-        # ================================================================
-        # NEW MANUAL ROW/COLUMN OPERATIONS
-        # ================================================================
-        
-      } else if(method == "remove_rows_by_index") {
-        indices_text <- step$additional_info$indices %||% ""
-        if(indices_text != "") {
-          # Parse comma-separated indices and ranges
-          indices_parts <- unlist(strsplit(indices_text, ","))
-          indices <- c()
-          for(part in indices_parts) {
-            part <- trimws(part)
-            if(grepl(":", part)) {
-              range_parts <- as.numeric(unlist(strsplit(part, ":")))
-              if(length(range_parts) == 2 && !any(is.na(range_parts))) {
-                indices <- c(indices, seq(range_parts[1], range_parts[2]))
-              }
-            } else {
-              idx <- as.numeric(part)
-              if(!is.na(idx)) indices <- c(indices, idx)
-            }
-          }
-          indices <- unique(round(indices))
-          indices <- indices[indices >= 1 & indices <= nrow(data)]
-          before <- nrow(data)
-          if(length(indices) > 0) {
-            data <- data[-indices, , drop = FALSE]
-            removed <- before - nrow(data)
-            add_to_log(paste("  Removed", removed, "rows by index"))
-            cat("  Removed", removed, "rows by index\n")
-          }
-        }
-        
-      } else if(method == "keep_rows_by_index") {
-        indices_text <- step$additional_info$keep_indices %||% ""
-        if(indices_text != "") {
-          indices_parts <- unlist(strsplit(indices_text, ","))
-          indices <- c()
-          for(part in indices_parts) {
-            part <- trimws(part)
-            if(grepl(":", part)) {
-              range_parts <- as.numeric(unlist(strsplit(part, ":")))
-              if(length(range_parts) == 2 && !any(is.na(range_parts))) {
-                indices <- c(indices, seq(range_parts[1], range_parts[2]))
-              }
-            } else {
-              idx <- as.numeric(part)
-              if(!is.na(idx)) indices <- c(indices, idx)
-            }
-          }
-          indices <- unique(round(indices))
-          indices <- indices[indices >= 1 & indices <= nrow(data)]
-          before <- nrow(data)
-          if(length(indices) > 0) {
-            data <- data[indices, , drop = FALSE]
-            removed <- before - nrow(data)
-            add_to_log(paste("  Kept", nrow(data), "rows, removed", removed, "rows"))
-            cat("  Kept", nrow(data), "rows, removed", removed, "rows\n")
-          }
-        }
-        
-      } else if(method == "remove_cols_by_name") {
-        cols_to_remove <- step$additional_info$remove_cols %||% character(0)
-        if(length(cols_to_remove) > 0) {
-          protected_cols <- c("CODE", "OBS_TYPE", "DEATH_RATE")
-          cols_to_remove <- cols_to_remove[!cols_to_remove %in% protected_cols]
-          before <- ncol(data)
-          data <- data[, !names(data) %in% cols_to_remove, drop = FALSE]
-          removed <- before - ncol(data)
-          add_to_log(paste("  Removed", removed, "columns by name"))
-          cat("  Removed", removed, "columns by name\n")
-        }
-        
-      } else if(method == "keep_cols_by_name") {
-        cols_to_keep <- step$additional_info$keep_cols %||% character(0)
-        if(length(cols_to_keep) > 0) {
-          always_keep <- c("CODE", "OBS_TYPE", "DEATH_RATE")
-          cols_to_keep <- unique(c(cols_to_keep, always_keep[always_keep %in% names(data)]))
-          before <- ncol(data)
-          data <- data[, names(data) %in% cols_to_keep, drop = FALSE]
-          removed <- before - ncol(data)
-          add_to_log(paste("  Kept", ncol(data), "columns, removed", removed, "columns"))
-          cat("  Kept", ncol(data), "columns, removed", removed, "columns\n")
-        }
-        
-        # ================================================================
-        # NEW OUTLIER REMOVAL METHODS
-        # ================================================================
-        
-      } else if(method == "remove_outliers_iqr") {
-        outlier_vars <- step$additional_info$outlier_vars %||% character(0)
-        iqr_mult <- step$additional_info$iqr_multiplier %||% 1.5
-        if(length(outlier_vars) > 0) {
-          result <- remove_outliers_iqr(data, outlier_vars, iqr_mult)
-          removed <- result$removed
-          data <- result$data
-          add_to_log(paste("  Removed", removed, "outliers using IQR method"))
-          cat("  Removed", removed, "outliers using IQR method\n")
-        }
-        
-      } else if(method == "remove_outliers_mahalanobis") {
-        prob <- step$additional_info$mahalanobis_prob %||% 0.999
-        result <- remove_outliers_mahalanobis(data, prob)
-        removed <- result$removed
-        data <- result$data
-        if(removed > 0) {
-          add_to_log(paste("  Removed", removed, "outliers using Mahalanobis distance"))
-        }
-        cat("  Removed", removed, "outliers using Mahalanobis distance\n")
-        
-      } else if(method == "remove_outliers_cooks") {
-        cooks_method <- step$additional_info$cooks_method %||% "4mean"
-        result <- remove_outliers_cooks(data, cooks_method)
-        removed <- result$removed
-        data <- result$data
-        if(removed > 0) {
-          add_to_log(paste("  Removed", removed, "outliers using Cook's distance"))
-        }
-        cat("  Removed", removed, "outliers using Cook's distance\n")
-        
-      } else if(method == "remove_outliers_lof") {
-        minPts <- step$additional_info$lof_minpts %||% 5
-        lof_threshold <- step$additional_info$lof_threshold %||% 2
-        result <- remove_outliers_lof(data, minPts, lof_threshold)
-        removed <- result$removed
-        data <- result$data
-        if(removed > 0) {
-          add_to_log(paste("  Removed", removed, "outliers using Local Outlier Factor"))
-        }
-        cat("  Removed", removed, "outliers using LOF\n")
-        
-      } else if(method == "remove_outliers_iforest") {
-        if_threshold <- step$additional_info$if_threshold %||% 0.6
-        result <- remove_outliers_iforest(data, if_threshold)
-        removed <- result$removed
-        data <- result$data
-        if(removed > 0) {
-          add_to_log(paste("  Removed", removed, "outliers using Isolation Forest"))
-        }
-        cat("  Removed", removed, "outliers using Isolation Forest\n")
-      }
-    }
-    
-    # Update the working data
-    processed_data_working(data)
-    
-    add_to_log(paste("=== Pipeline complete: reduced from", original_rows, "rows to", nrow(data), 
-                     "rows and", original_cols, "cols to", ncol(data), "cols ==="))
-    
-    showNotification(paste("Pipeline applied successfully!", nrow(data), "rows,", ncol(data), "columns"), 
-                     type = "message", duration = 5)
-    
-    cat("=== PIPELINE COMPLETE ===\n")
-    cat("Final dimensions:", nrow(data), "rows,", ncol(data), "cols\n\n")
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.4 AUTO-SAVE FUNCTIONALITY - Save Recipe Results Automatically
-  # ----------------------------------------------------------------------------
-  
-  # ----------------------------------------------------------------------------
-  # 7.4 AUTO-SAVE FUNCTIONALITY - Save Recipe Results Automatically
-  # ----------------------------------------------------------------------------
-  
-  # Auto-save processed dataset when pipeline is applied
-  observeEvent(processed_data_working(), {
-    data <- processed_data_working()
-    
-    isolate({
-      steps <- pipeline_steps()
-      
-      if(length(steps) > 0) {
-        # Try to get the user-provided pipeline name first
-        pipeline_name <- input$pipeline_name
-        timestamp <- format(Sys.time(), "%Y%m%d_%H%M")
-        
-        # If user provided a name, use it
-        if(!is.null(pipeline_name) && pipeline_name != "") {
-          # Clean the name (remove spaces, make it filename-friendly)
-          clean_name <- gsub(" ", "_", pipeline_name)
-          clean_name <- gsub("[^a-zA-Z0-9_]", "", clean_name)
-          auto_name <- paste0(clean_name, "_", timestamp)
-        } else {
-          # Fall back to auto-generated name based on operations
-          method_map <- list(
-            "remove_na_cols" = "cleaned",
-            "remove_na_rows" = "cleaned",
-            "remove_rows_by_index" = "filtered",
-            "keep_rows_by_index" = "filtered",
-            "remove_cols_by_name" = "selected",
-            "keep_cols_by_name" = "selected",
-            "remove_outliers_iqr" = "outliers_removed",
-            "remove_outliers_mahalanobis" = "outliers_removed",
-            "remove_outliers_cooks" = "outliers_removed",
-            "remove_outliers_lof" = "outliers_removed",
-            "remove_outliers_iforest" = "outliers_removed",
-            "impute_median" = "imputed",
-            "impute_mean" = "imputed",
-            "impute_manual" = "imputed",
-            "impute_knn" = "imputed",
-            "impute_bag" = "imputed",
-            "scale" = "scaled",
-            "center" = "centered",
-            "log_transform" = "log",
-            "sqrt_transform" = "sqrt",
-            "boxcox" = "transformed",
-            "yeojohnson" = "transformed",
-            "nzv" = "reduced",
-            "lincomb" = "reduced"
-          )
-          
-          # Collect unique operation types
-          operation_names <- c()
-          for(step in steps) {
-            method <- step$method
-            if(!is.null(method) && method != "") {
-              short_name <- method_map[[method]] %||% "processed"
-              if(!short_name %in% operation_names) {
-                operation_names <- c(operation_names, short_name)
-              }
-            }
-          }
-          
-          # Create base name from operations
-          if(length(operation_names) > 0) {
-            base_name <- paste(operation_names, collapse = "_")
-          } else {
-            base_name <- "processed"
-          }
-          
-          auto_name <- paste0(base_name, "_", timestamp)
-        }
-        
-        # Check for duplicates and add version number if needed
-        existing_names <- names(saved_datasets())
-        original_name <- auto_name
-        counter <- 1
-        while(auto_name %in% existing_names) {
-          auto_name <- paste0(original_name, "_v", counter)
-          counter <- counter + 1
-        }
-        
-        # Save the dataset
-        current <- saved_datasets()
-        current[[auto_name]] <- list(
-          data = data,
-          name = auto_name,
-          timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-          rows = nrow(data),
-          cols = ncol(data),
-          log = tail(processing_log(), 20)
-        )
-        saved_datasets(current)
-        
-        # Update the picker input in the modeling tab
-        updatePickerInput(session, "model_dataset_select", 
-                          choices = names(saved_datasets()),
-                          selected = auto_name)
-        
-        # Switch to saved dataset mode in modeling tab
-        updateRadioButtons(session, "model_data_source", selected = "saved")
-        
-        # Show notification with the name used
-        if(!is.null(pipeline_name) && pipeline_name != "") {
-          showNotification(paste("Recipe saved as:", auto_name), type = "message", duration = 5)
-        } else {
-          showNotification(paste("Recipe auto-saved as:", auto_name, "(no name provided)"), type = "message", duration = 5)
-        }
-        add_to_log(paste("Auto-saved recipe result as:", auto_name))
-      }
-    })
-  }, ignoreInit = TRUE)
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.5 PIPELINE RESET - Clear All Steps
-  # ----------------------------------------------------------------------------
-  
-  observeEvent(input$reset_pipeline_btn, {
-    pipeline_steps(list())
-    add_to_log("Reset pipeline - all steps cleared")
-    showNotification("Pipeline reset", type = "message")
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.6 SAVED PIPELINES MANAGEMENT - Save and Load Recipes
-  # ----------------------------------------------------------------------------
-  
-  # Save pipeline/recipe
+  # -------------------------------------------------------------------------
+  # Save and Load Recipes
+  # -------------------------------------------------------------------------
   observeEvent(input$save_pipeline_btn, {
     pipeline_name <- trimws(input$pipeline_name)
     if(pipeline_name == "") {
-      showNotification("Please enter a pipeline name", type = "error")
+      showNotification("Please enter a recipe name", type = "error")
       return()
     }
-    
     steps <- pipeline_steps()
-    
-    # Validate steps
     if(!is.list(steps) || length(steps) == 0) {
-      showNotification("No steps in pipeline. Add steps first.", type = "error")
+      showNotification("No steps in recipe. Add steps first.", type = "error")
       return()
     }
-    
-    # Make a deep copy of steps to ensure it's saved correctly
-    steps_to_save <- list()
-    for(i in seq_along(steps)) {
-      if(is.list(steps[[i]])) {
-        # Create a clean copy of the step
-        step_copy <- list(
-          id = steps[[i]]$id,
-          method = steps[[i]]$method,
-          cols = steps[[i]]$cols %||% character(0),
-          additional_info = steps[[i]]$additional_info,
-          skip_test = steps[[i]]$skip_test %||% FALSE
-        )
-        steps_to_save[[i]] <- step_copy
-      } else {
-        showNotification("Cannot save: Invalid step data", type = "error")
-        return()
-      }
-    }
-    
     current <- saved_pipelines()
-    current[[pipeline_name]] <- list(
-      steps = steps_to_save,
-      created = Sys.time(),
-      log = tail(processing_log(), 50)
-    )
+    original_name <- pipeline_name
+    counter <- 1
+    while(pipeline_name %in% names(current)) {
+      pipeline_name <- paste0(original_name, "_v", counter)
+      counter <- counter + 1
+    }
+    if(pipeline_name != original_name) {
+      showNotification(paste("Name already exists. Saved as:", pipeline_name), type = "warning")
+    }
+    current[[pipeline_name]] <- list(steps = steps, created = Sys.time(), comments = trimws(input$pipeline_comments %||% ""))
     saved_pipelines(current)
-    
-    # Save to file (if persistent storage is set up)
-    if(exists("save_pipelines_to_file")) {
-      save_pipelines_to_file()
-    }
-    
-    showNotification(paste("Pipeline", pipeline_name, "saved successfully with", length(steps_to_save), "steps"), type = "message")
-    add_to_log(paste("Saved pipeline:", pipeline_name, "with", length(steps_to_save), "steps"))
+    save_all_data()
+    updateTextInput(session, "pipeline_name", value = "")
+    updateTextAreaInput(session, "pipeline_comments", value = "")
+    showNotification(paste("Recipe saved as:", pipeline_name, "-", length(steps), "steps"), type = "message")
+    add_to_log(paste("Saved recipe:", pipeline_name))
   })
   
-  # ADD THE CLEAR NAME OBSERVER RIGHT HERE ↓↓↓
-  # Clear pipeline name after successful save
-  observeEvent(input$save_pipeline_btn, {
-    pipeline_name <- trimws(input$pipeline_name)
-    if(pipeline_name != "" && length(pipeline_steps()) > 0) {
-      # Only clear if save was successful
-      updateTextInput(session, "pipeline_name", value = "")
-    }
-  }, priority = 100)
-  
-  
-  # Display saved pipelines list
-  output$saved_pipelines_list <- renderUI({
-    pipelines <- saved_pipelines()
-    
-    if(length(pipelines) == 0) {
-      return(div(class = "alert alert-info", 
-                 "No saved recipes yet. Build one and save it above."))
-    }
-    
-    tagList(lapply(names(pipelines), function(name) {
-      pipeline <- pipelines[[name]]
-      steps_count <- length(pipeline$steps)
-      
-      div(class = "well", style = "padding: 8px; margin-bottom: 8px;",
-          div(style = "display: flex; justify-content: space-between; align-items: center;",
-              div(
-                strong(name, style = "color: #2C3E50;"),
-                br(),
-                tags$small(paste(steps_count, "steps |", format(pipeline$created, "%Y-%m-%d %H:%M")))
-              ),
-              div(
-                actionButton(paste0("load_pipeline_", gsub(" ", "_", name)), 
-                             label = "Load", 
-                             class = "btn-primary btn-xs",
-                             style = "margin-right: 5px;",
-                             onclick = paste0("Shiny.setInputValue('load_pipeline_trigger', '", name, "', {priority: 'event'})")),
-                actionButton(paste0("delete_pipeline_", gsub(" ", "_", name)), 
-                             label = "Delete", 
-                             class = "btn-danger btn-xs",
-                             onclick = paste0("Shiny.setInputValue('delete_pipeline_trigger', '", name, "', {priority: 'event'})"))
-              )
-          )
-      )
-    }))
-  })
-  
-  
-  # Load pipeline trigger
-  observeEvent(input$load_pipeline_trigger, {
-    pipeline_name <- input$load_pipeline_trigger
-    if(!is.null(pipeline_name) && pipeline_name != "" && pipeline_name %in% names(saved_pipelines())) {
-      # Get the saved pipeline
-      saved_pipeline <- saved_pipelines()[[pipeline_name]]
-      
-      # Extract steps and validate they are a list
-      loaded_steps <- saved_pipeline$steps
-      
-      # Check if loaded_steps is valid
-      if(is.null(loaded_steps)) {
-        showNotification(paste("Recipe", pipeline_name, "has no steps data"), type = "error")
-        return()
-      }
-      
-      # If loaded_steps is not a list, try to convert or show error
-      if(!is.list(loaded_steps)) {
-        showNotification(paste("Recipe", pipeline_name, "data is corrupted. Cannot load."), type = "error")
-        add_to_log(paste("Failed to load recipe:", pipeline_name, "- steps data is not a list"))
-        return()
-      }
-      
-      # If loaded_steps is empty, show warning
-      if(length(loaded_steps) == 0) {
-        showNotification(paste("Recipe", pipeline_name, "has no steps"), type = "warning")
-        pipeline_steps(list())
-        return()
-      }
-      
-      # Validate each step is a list
-      valid_steps <- TRUE
-      for(i in seq_along(loaded_steps)) {
-        if(!is.list(loaded_steps[[i]])) {
-          valid_steps <- FALSE
-          break
-        }
-      }
-      
-      if(!valid_steps) {
-        showNotification(paste("Recipe", pipeline_name, "contains invalid step data. Cannot load."), type = "error")
-        return()
-      }
-      
-      # Load the steps
-      pipeline_steps(loaded_steps)
-      showNotification(paste("Loaded recipe:", pipeline_name, "-", length(loaded_steps), "steps"), type = "message")
-      add_to_log(paste("Loaded saved recipe:", pipeline_name, "with", length(loaded_steps), "steps"))
-    }
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.7 PIPELINE SUMMARY DISPLAY - Show Current Steps
-  # ----------------------------------------------------------------------------
-  
-  output$pipeline_summary_ui <- renderUI({
+  observeEvent(input$save_as_pipeline_btn, {
     steps <- pipeline_steps()
-    
-    # Validate steps
     if(!is.list(steps) || length(steps) == 0) {
-      return(p(icon("info-circle"), " No steps added yet. Click 'Add Step' to begin.", style = "color: grey;"))
-    }
-    
-    # Check if first step is valid
-    if(!is.list(steps[[1]])) {
-      return(p(icon("exclamation-triangle"), " Pipeline data corrupted. Please reset and add steps again.", style = "color: orange;"))
-    }
-    
-    tagList(
-      lapply(seq_along(steps), function(i) {
-        step <- steps[[i]]
-        
-        # Ensure step is a list
-        if(!is.list(step)) {
-          return(div(style = "color: red;", paste("Step", i, ": Invalid step configuration")))
-        }
-        
-        method_name <- method_display_names[[step$method]] %||% (step$method %||% "Unknown method")
-        
-        # Build contextual info string with safe access
-        context <- ""
-        if(!is.null(step$cols) && length(step$cols) > 0) {
-          context <- paste0(" (", length(step$cols), " vars)")
-        }
-        if(step$method == "impute_knn" && !is.null(step$additional_info)) {
-          context <- paste0(context, " | k = ", step$additional_info)
-        }
-        if(step$method == "remove_na_rows" && !is.null(step$additional_info)) {
-          context <- paste0(context, " | threshold = ", step$additional_info, " missing")
-          if(!is.null(step$skip_test) && step$skip_test) context <- paste0(context, " | skip test")
-        }
-        if(step$method == "remove_na_cols" && !is.null(step$additional_info)) {
-          context <- paste0(context, " | >", step$additional_info, "% missing removed")
-        }
-        if(step$method == "remove_rows_by_index" && !is.null(step$additional_info$indices)) {
-          context <- paste0(context, " | removing specific rows")
-        }
-        if(step$method == "keep_rows_by_index" && !is.null(step$additional_info$keep_indices)) {
-          context <- paste0(context, " | keeping specific rows")
-        }
-        if(step$method == "remove_outliers_iqr" && !is.null(step$additional_info$outlier_vars)) {
-          context <- paste0(context, " | IQR=", step$additional_info$iqr_multiplier %||% 1.5)
-        }
-        
-        div(style = "display: flex; align-items: center; margin-bottom: 8px; padding: 5px; border-bottom: 1px solid #eee;",
-            div(style = "width: 30px;", strong(paste0(i, "."))),
-            div(style = "flex: 1;", method_name, context)
-        )
-      })
-    )
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.8 SAVED DATASETS MANAGEMENT - Save and Load Processed Data
-  # ----------------------------------------------------------------------------
-  
-  # Saved datasets list UI
-  output$saved_datasets_list <- renderUI({
-    datasets <- saved_datasets()
-    
-    if (length(datasets) == 0) {
-      return(div(class = "alert alert-info", 
-                 "No saved datasets yet. Process data and save one above."))
-    }
-    
-    tagList(lapply(names(datasets), function(name) {
-      ds <- datasets[[name]]
-      
-      div(class = "well", style = "padding: 8px; margin-bottom: 8px;",
-          div(style = "display: flex; justify-content: space-between; align-items: center;",
-              div(
-                strong(name, style = "color: #2C3E50;"),
-                br(),
-                tags$small(paste(ds$rows, "rows,", ds$cols, "cols |", ds$timestamp))
-              ),
-              actionButton(
-                "load_dataset_trigger",
-                label = "Load for Modeling",
-                class = "btn-primary btn-xs",
-                onclick = paste0(
-                  "Shiny.setInputValue('load_dataset_trigger', '",
-                  name, "', {priority: 'event'})"
-                )
-              )
-          )
-      )
-    }))
-  })
-  
-  
-  # Load dataset trigger
-  observeEvent(input$load_dataset_trigger, {
-    ds_name <- input$load_dataset_trigger
-    if (!is.null(ds_name) && ds_name != "" && ds_name %in% names(saved_datasets())) {
-      selected_model_dataset(ds_name)
-      showNotification(paste("Loaded dataset for modeling:", ds_name), type = "message")
-    }
-  })
-  
-  
-  # Save current dataset manually
-  observeEvent(input$save_dataset_btn, {
-    dataset_name <- trimws(input$dataset_name)
-    if(dataset_name == "") {
-      showNotification("Please enter a dataset name", type = "error")
+      showNotification("No steps in recipe. Add steps first.", type = "error")
       return()
     }
-    
-    current_data <- processed_data_working()
-    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    full_name <- paste0(dataset_name, " (", timestamp, ")")
-    
-    current <- saved_datasets()
-    current[[full_name]] <- list(
-      data = current_data,
-      name = dataset_name,
-      timestamp = timestamp,
-      rows = nrow(current_data),
-      cols = ncol(current_data),
-      log = tail(processing_log(), 20)
-    )
-    saved_datasets(current)
-    
-    # Update the picker input in the modeling tab
-    updatePickerInput(session, "model_dataset_select", 
-                      choices = names(saved_datasets()),
-                      selected = full_name)
-    
-    showNotification(paste("Dataset saved as:", full_name), type = "message")
-    add_to_log(paste("Saved dataset:", full_name))
-  })
-  
-  
-  # Model dataset selection observer
-  observeEvent(input$model_dataset_select, {
-    if(!is.null(input$model_dataset_select) && input$model_dataset_select != "") {
-      selected_model_dataset(input$model_dataset_select)
-      showNotification(paste("Selected dataset for modeling:", input$model_dataset_select), type = "message")
+    base_name <- trimws(input$pipeline_name)
+    if(base_name == "") {
+      base_name <- paste0("Recipe_", format(Sys.time(), "%Y%m%d_%H%M"))
     }
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    new_name <- paste0(base_name, "_", timestamp)
+    new_name <- gsub(" ", "_", new_name)
+    new_name <- gsub("[^a-zA-Z0-9_]", "", new_name)
+    current <- saved_pipelines()
+    current[[new_name]] <- list(steps = steps, created = Sys.time(), comments = trimws(input$pipeline_comments %||% paste("Saved on", format(Sys.time(), "%Y-%m-%d %H:%M"))))
+    saved_pipelines(current)
+    save_all_data()
+    updateTextInput(session, "pipeline_name", value = "")
+    updateTextAreaInput(session, "pipeline_comments", value = "")
+    showNotification(paste("✓ Recipe saved as NEW:", new_name, "-", length(steps), "steps"), type = "message")
+    add_to_log(paste("Saved new recipe:", new_name))
   })
   
-  
-  # ----------------------------------------------------------------------------
-  # 7.9 BATCH PROCESSOR FUNCTIONS - Quick Transformations
-  # ----------------------------------------------------------------------------
-  
-  # Apply transformation
-  observeEvent(input$proc_transform_btn, {
-    req(input$proc_transform_column)
-    
-    current_data <- processed_data_working()
-    
-    if(input$proc_transform_column %in% names(current_data)) {
-      col_data <- current_data[[input$proc_transform_column]]
-      
-      if(is.numeric(col_data)) {
-        method <- input$proc_transform_method
-        
-        tryCatch({
-          if(method == "log") {
-            if(min(col_data, na.rm = TRUE) > 0) {
-              current_data[[input$proc_transform_column]] <- log(col_data)
-              add_to_log(paste("Applied log transformation to:", input$proc_transform_column))
-              showNotification(paste("Log transformation applied to:", input$proc_transform_column), type = "message")
-            } else {
-              showNotification("Log transformation requires positive values (>0)", type = "error")
-              return()
-            }
-          } else if(method == "sqrt") {
-            if(min(col_data, na.rm = TRUE) >= 0) {
-              current_data[[input$proc_transform_column]] <- sqrt(col_data)
-              add_to_log(paste("Applied square root transformation to:", input$proc_transform_column))
-              showNotification(paste("Square root transformation applied to:", input$proc_transform_column), type = "message")
-            } else {
-              showNotification("Square root requires non-negative values (>=0)", type = "error")
-              return()
-            }
-          } else if(method == "square") {
-            current_data[[input$proc_transform_column]] <- col_data^2
-            add_to_log(paste("Applied square transformation to:", input$proc_transform_column))
-            showNotification(paste("Square transformation applied to:", input$proc_transform_column), type = "message")
-          } else if(method == "boxcox") {
-            if(requireNamespace("MASS", quietly = TRUE)) {
-              if(min(col_data, na.rm = TRUE) > 0) {
-                bc <- MASS::boxcox(col_data ~ 1, plotit = FALSE)
-                lambda <- bc$x[which.max(bc$y)]
-                if(abs(lambda) < 0.01) {
-                  current_data[[input$proc_transform_column]] <- log(col_data)
-                } else {
-                  current_data[[input$proc_transform_column]] <- (col_data^lambda - 1) / lambda
-                }
-                add_to_log(paste("Applied Box-Cox transformation (lambda =", round(lambda, 3), ") to:", input$proc_transform_column))
-                showNotification(paste("Box-Cox transformation applied (lambda =", round(lambda, 3), ")"), type = "message")
-              } else {
-                showNotification("Box-Cox requires positive values (>0)", type = "error")
-                return()
-              }
-            } else {
-              showNotification("MASS package required for Box-Cox transformation", type = "error")
-              return()
-            }
-          } else if(method == "yeojohnson") {
-            if(requireNamespace("bestNormalize", quietly = TRUE)) {
-              yj <- bestNormalize::yeojohnson(col_data)
-              current_data[[input$proc_transform_column]] <- predict(yj, col_data)
-              add_to_log(paste("Applied Yeo-Johnson transformation (lambda =", round(yj$lambda, 3), ") to:", input$proc_transform_column))
-              showNotification(paste("Yeo-Johnson transformation applied (lambda =", round(yj$lambda, 3), ")"), type = "message")
-            } else {
-              showNotification("bestNormalize package required for Yeo-Johnson transformation", type = "error")
-              return()
-            }
-          }
-          
-          processed_data_working(current_data)
-          
-        }, error = function(e) {
-          showNotification(paste("Transformation error:", e$message), type = "error", duration = 5)
-        })
-      } else {
-        showNotification("Selected column is not numeric", type = "error")
-      }
-    } else {
-      showNotification(paste("Column not found:", input$proc_transform_column), type = "warning")
-    }
-  })
-  
-  
-  # Numeric imputation
-  observeEvent(input$proc_impute_btn, {
-    req(input$proc_impute_column)
-    
-    current_data <- standardize_missing(processed_data_working())
-    
-    if(input$proc_impute_column %in% names(current_data)) {
-      col_data <- current_data[[input$proc_impute_column]]
-      na_count <- sum(is.na(col_data))
-      
-      if(na_count > 0) {
-        method <- input$proc_impute_method
-        
-        if(method == "median" && is.numeric(col_data)) {
-          impute_val <- median(col_data, na.rm = TRUE)
-          current_data[[input$proc_impute_column]][is.na(col_data)] <- impute_val
-          add_to_log(paste("Imputed", na_count, "missing values in", input$proc_impute_column, "with median =", round(impute_val, 3)))
-          showNotification(paste("Imputed", na_count, "missing values with median =", round(impute_val, 3)), type = "message")  
-          
-        } else if(method == "mean" && is.numeric(col_data)) {
-          impute_val <- mean(col_data, na.rm = TRUE)
-          current_data[[input$proc_impute_column]][is.na(col_data)] <- impute_val
-          add_to_log(paste("Imputed", na_count, "missing values in", input$proc_impute_column, "with mean =", round(impute_val, 3)))
-          showNotification(paste("Imputed", na_count, "missing values with mean =", round(impute_val, 3)), type = "message")
-          
-        } else if(method == "constant") {
-          impute_val <- input$proc_impute_value
-          current_data[[input$proc_impute_column]][is.na(col_data)] <- impute_val
-          add_to_log(paste("Imputed", na_count, "missing values in", input$proc_impute_column, "with constant =", impute_val))
-          showNotification(paste("Imputed", na_count, "missing values with constant =", impute_val), type = "message")
-          
-        } else {
-          showNotification("Imputation method not compatible with this column type", type = "error")
-          return()
-        }
-        
-        processed_data_working(current_data)
-        
-      } else {
-        showNotification(paste("No missing values found in column:", input$proc_impute_column), type = "message")
-      }
-    } else {
-      showNotification(paste("Column not found:", input$proc_impute_column), type = "warning")
-    }
-  })
-  
-  
-  # Categorical imputation
-  observeEvent(input$proc_impute_cat_btn, {
-    req(input$proc_impute_cat_column)
-    
-    current_data <- standardize_missing(processed_data_working())
-    column <- input$proc_impute_cat_column
-    method <- input$proc_impute_cat_method
-    constant_value <- if(method == "constant") input$proc_impute_cat_value else NULL
-    
-    if(!column %in% names(current_data)) {
-      showNotification(paste("Column", column, "not found in current data"), type = "error")
+  observeEvent(input$load_pipeline_trigger, {
+    req(input$load_pipeline_trigger)
+    pipeline_name <- input$load_pipeline_trigger
+    if(!pipeline_name %in% names(saved_pipelines())) {
+      showNotification(paste("Recipe", pipeline_name, "not found"), type = "error")
       return()
     }
-    
-    if(column %in% numeric_cols) {
-      showNotification(paste(column, "is a numeric column. Use numeric imputation instead."), type = "warning")
+    saved_pipeline <- saved_pipelines()[[pipeline_name]]
+    if(is.null(saved_pipeline$steps) || !is.list(saved_pipeline$steps)) {
+      showNotification(paste("Recipe", pipeline_name, "has invalid step data"), type = "error")
       return()
     }
-    
-    col_data <- current_data[[column]]
-    na_count <- sum(is.na(col_data))
-    
-    if(na_count == 0) {
-      showNotification(paste("No missing values in column:", column), type = "message")
+    loaded_steps <- saved_pipeline$steps
+    if(length(loaded_steps) == 0) {
+      showNotification(paste("Recipe", pipeline_name, "has no steps"), type = "warning")
+      pipeline_steps(list())
       return()
     }
-    
-    if(method == "mode") {
-      tbl <- table(col_data)
-      impute_val <- names(tbl)[which.max(tbl)]
-      current_data[[column]][is.na(col_data)] <- impute_val
-      add_to_log(paste("Imputed", na_count, "missing values in", column, "with mode =", impute_val))
-      showNotification(paste("Imputed", na_count, "missing values with mode =", impute_val), type = "message")
-      
-    } else if(method == "new_category") {
-      current_data[[column]] <- as.character(current_data[[column]])
-      current_data[[column]][is.na(current_data[[column]])] <- "Missing"
-      current_data[[column]] <- as.factor(current_data[[column]])
-      add_to_log(paste("Imputed", na_count, "missing values in", column, "with new category 'Missing'"))
-      showNotification(paste("Imputed", na_count, "missing values with new category 'Missing'"), type = "message")
-      
-    } else if(method == "constant") {
-      current_data[[column]][is.na(col_data)] <- constant_value
-      add_to_log(paste("Imputed", na_count, "missing values in", column, "with constant =", constant_value))
-      showNotification(paste("Imputed", na_count, "missing values with constant =", constant_value), type = "message")
-    }
-    
-    processed_data_working(current_data)
-  })
-  
-  
-  # Remove rows
-  observeEvent(input$proc_remove_rows_btn, {
-    current_data <- processed_data_working()
-    
-    row_missing <- apply(current_data, 1, function(x) sum(is.na(x)))
-    rows_to_keep <- row_missing <= input$proc_max_missing_per_row
-    rows_removed <- sum(!rows_to_keep)
-    
-    if(rows_removed > 0) {
-      new_data <- current_data[rows_to_keep, , drop = FALSE]
-      processed_data_working(new_data)
-      add_to_log(paste("Removed", rows_removed, "rows with >=", input$proc_max_missing_per_row, "missing values"))
-      showNotification(paste("Removed", rows_removed, "rows"), type = "message")
-    } else {
-      showNotification(paste("No rows exceeded the missing value threshold of", input$proc_max_missing_per_row), type = "message")
-    }
-  })
-  
-  
-  # Remove column
-  observeEvent(input$proc_remove_col_btn, {
-    req(input$proc_remove_column)
-    
-    protected_cols <- c("CODE", "OBS_TYPE", "DEATH_RATE")
-    
-    if(input$proc_remove_column %in% protected_cols) {
-      showNotification(paste("Cannot remove protected column:", input$proc_remove_column), type = "error", duration = 5)
-      return()
-    }
-    
-    current_data <- processed_data_working()
-    
-    if(input$proc_remove_column %in% names(current_data)) {
-      new_data <- current_data[, !names(current_data) %in% input$proc_remove_column, drop = FALSE]
-      processed_data_working(new_data)
-      add_to_log(paste("Removed column:", input$proc_remove_column))
-      showNotification(paste("Removed column:", input$proc_remove_column), type = "message")
-    } else {
-      showNotification(paste("Column not found:", input$proc_remove_column), type = "warning")
-    }
-  })
-  
-  
-  # Batch apply all quick actions
-  observeEvent(input$proc_apply_all, {
-    data <- standardize_missing(df)
-    add_to_log("Starting batch processing with standardized data")
-    
-    if(!is.null(input$proc_impute_column) && input$proc_impute_column != "" && 
-       input$proc_impute_column %in% names(data) && any(is.na(data[[input$proc_impute_column]]))) {
-      if(is.numeric(data[[input$proc_impute_column]])) {
-        impute_val <- median(data[[input$proc_impute_column]], na.rm = TRUE)
-        na_count <- sum(is.na(data[[input$proc_impute_column]]))
-        data[[input$proc_impute_column]][is.na(data[[input$proc_impute_column]])] <- impute_val
-        add_to_log(paste("Imputed", na_count, "missing values in", input$proc_impute_column, "with median =", round(impute_val, 3)))
-      }
-    }
-    
-    if(!is.null(input$proc_transform_column) && input$proc_transform_column != "" && 
-       input$proc_transform_column %in% names(data) && is.numeric(data[[input$proc_transform_column]])) {
-      col_data <- data[[input$proc_transform_column]]
-      if(min(col_data, na.rm = TRUE) > 0) {
-        data[[input$proc_transform_column]] <- log(col_data)
-        add_to_log(paste("Applied log transformation to:", input$proc_transform_column))
-      }
-    }
-    
-    row_missing <- apply(data, 1, function(x) sum(is.na(x)))
-    rows_to_keep <- row_missing <= input$proc_max_missing_per_row
-    rows_removed <- sum(!rows_to_keep)
-    if(rows_removed > 0) {
-      data <- data[rows_to_keep, , drop = FALSE]
-      add_to_log(paste("Removed", rows_removed, "rows with >=", input$proc_max_missing_per_row, "missing values"))
-    }
-    
-    processed_data_working(data)
-    add_to_log("--- Batch processing complete ---")
-    showNotification("Batch processing applied!", type = "message", duration = 5)
-  })
-  
-  
-  # Reset to original data
-  observeEvent(input$proc_reset_all, {
-    processed_data_working(standardize_missing(df))
-    add_to_log("--- Reset to original data ---")
-    showNotification("Reset to original data", type = "message")
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.10 DATA PREVIEW AND SUMMARY OUTPUTS
-  # ----------------------------------------------------------------------------
-  
-  # Data summary output
-  output$proc_data_summary <- renderPrint({
-    data <- processed_data_working()
-    
-    total_missing <- sum(is.na(data))
-    total_cells <- nrow(data) * ncol(data)
-    missing_pct <- round(100 * total_missing / total_cells, 2)
-    
-    cat("Current Data Summary\n")
-    cat("====================\n\n")
-    cat("Observations:", nrow(data), "of", nrow(df), "\n")
-    cat("Variables:", ncol(data), "of", ncol(df), "\n")
-    cat("Missing values (R NA):", total_missing, "\n")
-    cat("Missing %:", missing_pct, "%\n\n")
-    
-    cat("Variables with missing values:\n")
-    missing_by_var <- colSums(is.na(data))
-    missing_by_var <- missing_by_var[missing_by_var > 0]
-    
-    if(length(missing_by_var) > 0) {
-      for(i in seq_along(missing_by_var)) {
-        pct <- round(100 * missing_by_var[i] / nrow(data), 1)
-        cat("  ", names(missing_by_var)[i], ":", missing_by_var[i], "missing (", pct, "%)\n")
-      }
-    } else {
-      cat("  No missing values in any variable!\n")
-    }
-  })
-  
-  
-  # Data preview output
-  output$proc_data_preview <- renderDT({
-    data <- processed_data_working()
-    datatable(head(data, 20), 
-              options = list(scrollX = TRUE, pageLength = 10, dom = 't'), 
-              rownames = FALSE)
-  })
-  
-  
-  # Processing log output
-  output$proc_log <- renderPrint({
-    log_entries <- processing_log()
-    if(length(log_entries) == 0) {
-      cat("No processing actions yet.\nUse the controls above to modify the data.")
-    } else {
-      cat(paste(log_entries, collapse = "\n"))
-    }
-  })
-  
-  
-  # Download handler
-  output$proc_download_data <- downloadHandler(
-    filename = function() {
-      paste("processed_data_", Sys.Date(), ".csv", sep = "")
-    },
-    content = function(file) {
-      write.csv(processed_data_working(), file, row.names = FALSE)
-    }
-  )
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.11 BATCH PROCESSOR OUTPUTS (for the Batch Processor sub-tab)
-  # ----------------------------------------------------------------------------
-  
-  output$proc_log_batch <- renderPrint({
-    log_entries <- processing_log()
-    if(length(log_entries) == 0) {
-      cat("No processing actions yet.\nUse the controls above to modify the data.")
-    } else {
-      cat(paste(log_entries, collapse = "\n"))
-    }
-  })
-  
-  
-  output$proc_data_summary_batch <- renderPrint({
-    data <- processed_data_working()
-    
-    total_missing <- sum(is.na(data))
-    total_cells <- nrow(data) * ncol(data)
-    missing_pct <- round(100 * total_missing / total_cells, 2)
-    
-    cat("Current Data Summary\n")
-    cat("====================\n\n")
-    cat("Observations:", nrow(data), "of", nrow(df), "\n")
-    cat("Variables:", ncol(data), "of", ncol(df), "\n")
-    cat("Missing values (R NA):", total_missing, "\n")
-    cat("Missing %:", missing_pct, "%\n\n")
-    
-    cat("Variables with missing values:\n")
-    missing_by_var <- colSums(is.na(data))
-    missing_by_var <- missing_by_var[missing_by_var > 0]
-    
-    if(length(missing_by_var) > 0) {
-      for(i in seq_along(missing_by_var)) {
-        pct <- round(100 * missing_by_var[i] / nrow(data), 1)
-        cat("  ", names(missing_by_var)[i], ":", missing_by_var[i], "missing (", pct, "%)\n")
-      }
-    } else {
-      cat("  No missing values in any variable!\n")
-    }
-  })
-  
-  
-  output$proc_data_preview_batch <- renderDT({
-    data <- processed_data_working()
-    datatable(head(data, 20), 
-              options = list(scrollX = TRUE, pageLength = 10, dom = 't'), 
-              rownames = FALSE)
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.12 TAB SWITCH WARNING - Remind to save recipes
-  # ----------------------------------------------------------------------------
-  
-  # Warn when leaving Recipe Builder with unsaved changes
-  observeEvent(input$processing_approach, {
-    steps <- pipeline_steps()
-    if(length(steps) > 0) {
-      showNotification("Remember to save your recipe before switching tabs!", 
-                       type = "warning", duration = 3)
-    }
-  })
-  
-  
-  # ----------------------------------------------------------------------------
-  # 7.13 PERSISTENT STORAGE - Save/Load Recipes to File
-  # ----------------------------------------------------------------------------
-  
-    # Save all pipelines to a CSV file
-  save_pipelines_to_file <- function() {
-    pipelines <- saved_pipelines()
-    if(length(pipelines) == 0) return()
-    
-    # Convert pipelines to a data frame for saving
-    pipelines_df <- data.frame()
-    for(name in names(pipelines)) {
-      pipeline <- pipelines[[name]]
-      # Ensure steps is valid before converting to JSON
-      if(is.list(pipeline$steps)) {
-        # Create a simplified version of steps for JSON
-        steps_simple <- list()
-        for(i in seq_along(pipeline$steps)) {
-          if(is.list(pipeline$steps[[i]])) {
-            steps_simple[[i]] <- list(
-              id = pipeline$steps[[i]]$id,
-              method = pipeline$steps[[i]]$method,
-              cols = pipeline$steps[[i]]$cols %||% character(0),
-              additional_info = pipeline$steps[[i]]$additional_info,
-              skip_test = pipeline$steps[[i]]$skip_test %||% FALSE
-            )
-          }
-        }
-        steps_json <- jsonlite::toJSON(steps_simple, auto_unbox = TRUE)
-      } else {
-        steps_json <- "[]"
-      }
-      
-      pipelines_df <- rbind(pipelines_df, data.frame(
-        name = name,
-        created = as.character(pipeline$created),
-        steps = steps_json,
-        stringsAsFactors = FALSE
-      ))
-    }
-    
-    # Save to a CSV file in the app directory
-    write.csv(pipelines_df, "saved_recipes.csv", row.names = FALSE)
-    
-    # Use tryCatch for logging since this might be called from non-reactive context
-    tryCatch({
-      add_to_log("Saved all recipes to file")
-    }, error = function(e) {
-      # Silently fail - logging not critical
-    })
-  }
-  
-  # Auto-save pipelines whenever they change
-  observeEvent(saved_pipelines(), {
-    save_pipelines_to_file()
-  }, ignoreInit = TRUE)
-  
-  
-  
-  # Load pipelines on app startup - wrap in observe to make it reactive
-  observe({
-    # Only run once when the app starts
-    isolate({
-      load_pipelines_from_file()
-    })
-  })
-  
-  # Load pipelines from CSV file
-  load_pipelines_from_file <- function() {
-    if(file.exists("saved_recipes.csv")) {
-      pipelines_df <- read.csv("saved_recipes.csv", stringsAsFactors = FALSE)
-      loaded_pipelines <- list()
-      
-      for(i in 1:nrow(pipelines_df)) {
-        name <- pipelines_df$name[i]
-        steps_json <- pipelines_df$steps[i]
-        
-        # Parse JSON safely
-        steps <- tryCatch({
-          jsonlite::fromJSON(steps_json)
-        }, error = function(e) {
-          NULL
-        })
-        
-        # Ensure steps have the correct structure and are a list
-        if(!is.null(steps) && is.list(steps)) {
-          # If steps is a named list, convert to unnamed list if needed
-          if(!is.null(names(steps)) && length(steps) > 0) {
-            # Convert named list to unnamed list of steps
-            steps_list <- list()
-            for(j in seq_along(steps)) {
-              if(is.list(steps[[j]])) {
-                steps_list[[j]] <- steps[[j]]
-              }
-            }
-            steps <- steps_list
-          }
-          
-          loaded_pipelines[[name]] <- list(
-            steps = steps,
-            created = as.POSIXct(pipelines_df$created[i]),
-            log = character(0)
-          )
+    reconstructed_steps <- list()
+    for(i in seq_along(loaded_steps)) {
+      step <- loaded_steps[[i]]
+      if(is.list(step)) {
+        reconstructed_step <- list(id = i, method = step$method %||% "", cols = step$cols %||% character(0), additional_info = step$additional_info %||% NULL)
+        if(reconstructed_step$method != "") {
+          reconstructed_steps[[i]] <- reconstructed_step
         }
       }
-      
-      if(length(loaded_pipelines) > 0) {
-        saved_pipelines(loaded_pipelines)
-        
-        # Use tryCatch for logging since this might be called from non-reactive context
-        tryCatch({
-          add_to_log(paste("Loaded", length(loaded_pipelines), "recipes from file"))
-        }, error = function(e) {
-          # Silently fail - logging not critical
-        })
-      }
     }
-  }
+    reconstructed_steps <- reconstructed_steps[!sapply(reconstructed_steps, is.null)]
+    if(length(reconstructed_steps) == 0) {
+      showNotification("No valid steps found in recipe", type = "error")
+      return()
+    }
+    pipeline_steps(reconstructed_steps)
+    updateTextInput(session, "pipeline_name", value = paste0(pipeline_name, "_modified"))
+    comments_msg <- if(!is.null(saved_pipeline$comments) && saved_pipeline$comments != "") paste0(" - Notes: ", saved_pipeline$comments) else ""
+    showNotification(paste("✓ Loaded recipe:", pipeline_name, "-", length(reconstructed_steps), "steps", comments_msg), type = "message", duration = 5)
+    add_to_log(paste("Loaded saved recipe:", pipeline_name))
+  })
   
-  
-  # Delete pipeline/recipe - Add this after the load_pipeline_trigger observer
   observeEvent(input$delete_pipeline_trigger, {
     pipeline_name <- input$delete_pipeline_trigger
     if(!is.null(pipeline_name) && pipeline_name != "" && pipeline_name %in% names(saved_pipelines())) {
-      # Show confirmation dialog
-      showModal(modalDialog(
-        title = "Delete Recipe",
-        paste("Are you sure you want to delete the recipe:", pipeline_name, "?"),
-        footer = tagList(
-          modalButton("Cancel"),
-          actionButton("confirm_delete_pipeline", "Delete", class = "btn-danger")
-        ),
-        easyClose = TRUE
-      ))
-      
-      # Store the name to delete
+      showModal(modalDialog(title = "Delete Recipe", paste("Are you sure you want to delete the recipe:", pipeline_name, "?"),
+                            footer = tagList(modalButton("Cancel"), actionButton("confirm_delete_pipeline", "Delete", class = "btn-danger")), easyClose = TRUE))
       pipeline_to_delete <- pipeline_name
-      
-      # Handle confirmation
       observeEvent(input$confirm_delete_pipeline, {
-        # Remove the pipeline
         current <- saved_pipelines()
         current[[pipeline_to_delete]] <- NULL
         saved_pipelines(current)
-        
-        # Save to file after deletion
-        if(exists("save_pipelines_to_file")) {
-          save_pipelines_to_file()
-        }
-        
+        save_all_data()
         showNotification(paste("Recipe", pipeline_to_delete, "deleted"), type = "message")
         add_to_log(paste("Deleted recipe:", pipeline_to_delete))
-        
-        # Remove the modal
         removeModal()
       }, once = TRUE)
     }
   })
   
+  observeEvent(input$apply_loaded_recipe_btn, {
+    steps <- pipeline_steps()
+    if(length(steps) == 0) {
+      showNotification("No recipe loaded. Load a recipe first.", type = "warning")
+      return()
+    }
+    isolate({ processed_data_working(standardize_missing(df)) })
+    data <- isolate(processed_data_working())
+    original_rows <- nrow(data); original_cols <- ncol(data)
+    add_to_log(paste("=== Applying loaded recipe with", length(steps), "steps ==="))
+    data <- apply_steps_to_data(data, steps)
+    processed_data_working(data)
+    add_to_log(paste("=== Recipe complete: from", original_rows, "rows to", nrow(data), "rows, from", original_cols, "cols to", ncol(data), "cols ==="))
+    showNotification(paste("✓ Recipe applied successfully!", nrow(data), "rows,", ncol(data), "columns"), type = "message", duration = 5)
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M")
+    ds_name <- paste0("Processed_", timestamp)
+    current <- saved_datasets()
+    current[[ds_name]] <- list(data = data, name = ds_name, timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+                               rows = nrow(data), cols = ncol(data), comments = "Processed using recipe builder")
+    saved_datasets(current)
+    save_all_data()
+    updatePickerInput(session, "model_dataset_select", choices = names(saved_datasets()), selected = ds_name)
+    add_to_log(paste("Auto-saved processed data as:", ds_name))
+  })
+  
+  # -------------------------------------------------------------------------
+  # UI Outputs for Recipe Builder
+  # -------------------------------------------------------------------------
+  output$saved_pipelines_list <- renderUI({
+    pipelines <- saved_pipelines()
+    if(length(pipelines) == 0) {
+      return(div(class = "alert alert-info", "No saved recipes yet. Build one and save it above."))
+    }
+    tagList(lapply(names(pipelines), function(name) {
+      pipeline <- pipelines[[name]]
+      steps_count <- length(pipeline$steps)
+      comments_html <- if(!is.null(pipeline$comments) && pipeline$comments != "") {
+        tags$div(style = "font-size: 10px; color: #666; margin-top: 4px;", icon("comment"), " ", pipeline$comments)
+      } else { NULL }
+      created_time <- if(!is.null(pipeline$created)) format(pipeline$created, "%Y-%m-%d %H:%M") else "Unknown date"
+      div(class = "well", style = "padding: 8px; margin-bottom: 8px;",
+          div(style = "display: flex; justify-content: space-between; align-items: center;",
+              div(strong(name, style = "color: #2C3E50;"), br(),
+                  tags$small(paste(steps_count, "steps |", created_time)), comments_html),
+              div(actionButton(paste0("load_pipeline_", gsub(" ", "_", name)), label = "Load", class = "btn-primary btn-xs",
+                               style = "margin-right: 5px;", onclick = paste0("Shiny.setInputValue('load_pipeline_trigger', '", name, "', {priority: 'event'})")),
+                  actionButton(paste0("delete_pipeline_", gsub(" ", "_", name)), label = "Delete", class = "btn-danger btn-xs",
+                               onclick = paste0("Shiny.setInputValue('delete_pipeline_trigger', '", name, "', {priority: 'event'})"))))
+      )
+    }))
+  })
+  
+  output$saved_datasets_list <- renderUI({
+    datasets <- saved_datasets()
+    if(length(datasets) == 0) {
+      return(div(class = "alert alert-info", "No saved datasets yet. Process data and save one above."))
+    }
+    tagList(lapply(names(datasets), function(name) {
+      ds <- datasets[[name]]
+      comments_html <- if(!is.null(ds$comments) && ds$comments != "") {
+        tags$div(style = "font-size: 10px; color: #666; margin-top: 4px;", icon("comment"), " ", ds$comments)
+      } else { NULL }
+      div(class = "well", style = "padding: 8px; margin-bottom: 8px;",
+          div(style = "display: flex; justify-content: space-between; align-items: center;",
+              div(strong(name, style = "color: #2C3E50;"), br(),
+                  tags$small(paste(ds$rows, "rows,", ds$cols, "cols |", ds$timestamp)), comments_html),
+              actionButton("load_dataset_trigger", label = "Load for Modeling", class = "btn-primary btn-xs",
+                           onclick = paste0("Shiny.setInputValue('load_dataset_trigger', '", name, "', {priority: 'event'})")))
+      )
+    }))
+  })
+  
+  output$pipeline_summary_ui <- renderUI({
+    steps <- pipeline_steps()
+    if(!is.list(steps) || length(steps) == 0) {
+      return(p(icon("info-circle"), " No steps added yet. Click 'Add Step' to begin.", style = "color: grey;"))
+    }
+    step_elements <- list()
+    for(i in seq_along(steps)) {
+      step <- steps[[i]]
+      method_name <- method_display_names[[step$method]] %||% (step$method %||% "Not selected")
+      context <- ""
+      if(!is.null(step$cols) && length(step$cols) > 0) {
+        context <- paste0(" (", length(step$cols), " vars)")
+      }
+      if(step$method == "remove_na_rows" && !is.null(step$additional_info)) {
+        context <- paste0(context, " | threshold = ", step$additional_info, " missing")
+      }
+      if(step$method == "remove_na_cols" && !is.null(step$additional_info)) {
+        context <- paste0(context, " | threshold = ", step$additional_info, "%")
+      }
+      if(is.null(step$method) || step$method == "") {
+        method_name <- "No method selected"
+      }
+      step_elements <- append(step_elements, list(
+        div(style = "display: flex; align-items: center; margin-bottom: 10px; padding: 8px; border-bottom: 1px solid #eee; background-color: #f8f9fa; border-radius: 4px;",
+            div(style = "width: 35px; font-weight: bold; color: #2C3E50;", paste0(i, ".")),
+            div(style = "flex: 1;", span(style = "font-weight: 500;", method_name), span(style = "color: #666; font-size: 12px; margin-left: 5px;", context)))
+      ))
+    }
+    tagList(step_elements)
+  })
+  
+  output$proc_data_summary_recipe <- renderPrint({
+    data <- processed_data_working()
+    total_missing <- sum(is.na(data))
+    total_cells <- nrow(data) * ncol(data)
+    missing_pct <- round(100 * total_missing / total_cells, 2)
+    cat("Current Data Summary\n====================\n\n")
+    cat("Observations:", nrow(data), "of", nrow(df), "\n")
+    cat("Variables:", ncol(data), "of", ncol(df), "\n")
+    cat("Missing values (R NA):", total_missing, "\n")
+    cat("Missing %:", missing_pct, "%\n\n")
+    cat("Variables with missing values:\n")
+    missing_by_var <- colSums(is.na(data))
+    missing_by_var <- missing_by_var[missing_by_var > 0]
+    if(length(missing_by_var) > 0) {
+      for(i in seq_along(missing_by_var)) {
+        pct <- round(100 * missing_by_var[i] / nrow(data), 1)
+        cat("  ", names(missing_by_var)[i], ":", missing_by_var[i], "missing (", pct, "%)\n")
+      }
+    } else {
+      cat("  No missing values in any variable!\n")
+    }
+  })
+  
+  output$proc_data_preview_recipe <- renderDT({
+    data <- processed_data_working()
+    datatable(head(data, 20), options = list(scrollX = TRUE, pageLength = 10, dom = 't'), rownames = FALSE)
+  })
+  
+  output$proc_log_recipe <- renderPrint({
+    log_entries <- processing_log()
+    if(length(log_entries) == 0) {
+      cat("No processing actions yet.\nBuild a recipe and click 'Apply Recipe' to see results.")
+    } else {
+      recent_log <- tail(log_entries, 30)
+      cat(paste(recent_log, collapse = "\n"))
+    }
+  })
+  
+  output$proc_download_data_recipe <- downloadHandler(
+    filename = function() { paste("processed_data_", Sys.Date(), ".csv", sep = "") },
+    content = function(file) { write.csv(processed_data_working(), file, row.names = FALSE) }
+  )
+  
+  # Load dataset for modeling
+  observeEvent(input$load_dataset_trigger, {
+    ds_name <- input$load_dataset_trigger
+    if(!is.null(ds_name) && ds_name != "" && ds_name %in% names(saved_datasets())) {
+      saved_ds <- saved_datasets()[[ds_name]]
+      if(is.list(saved_ds) && !is.null(saved_ds$data)) {
+        processed_data_working(saved_ds$data)
+        selected_model_dataset(ds_name)
+        updateRadioButtons(session, "model_data_source", selected = "saved")
+        updatePickerInput(session, "model_dataset_select", choices = names(saved_datasets()), selected = ds_name)
+        comments_msg <- if(!is.null(saved_ds$comments) && saved_ds$comments != "") paste0(" - Notes: ", saved_ds$comments) else ""
+        showNotification(paste("Loaded dataset:", ds_name, "(", saved_ds$rows, "rows,", saved_ds$cols, "cols)", comments_msg), type = "message")
+        add_to_log(paste("Loaded saved dataset:", ds_name, comments_msg))
+      } else {
+        showNotification(paste("Dataset", ds_name, "has invalid structure"), type = "error")
+      }
+    }
+  })
   
   
   
-  # ============================================================================
-  # ============================================================================
-  # SECTION 8: REPORT SUMMARY OUTPUTS
-  # ============================================================================
-  # ============================================================================
+  # ========================================================================
+  # ========================================================================
+  # SECTION 12: INTRODUCTION TAB OUTPUTS
+  # ========================================================================
+  # ========================================================================
   
-  output$report_data_desc <- renderText({ 
+  output$intro_data_desc <- renderText({ 
     paste("Dataset contains", nrow(df), "rows and", ncol(df), "columns. ",
           "The outcome variable is DEATH_RATE (projected death rate across ten years). ",
           "There are", length(numeric_cols), "numeric predictors and", length(categorical_cols), 
           "categorical variables including the state CODE and OBS_TYPE for train/test allocation.")
   })
   
-  output$report_missing_strategy <- renderText({ 
+  output$intro_missing_strategy <- renderText({ 
     paste("Missing values are represented by '-99', '--', and 'NA' strings. ",
           "Users can remove columns exceeding missing thresholds, remove rows with too many missing values, ",
           "impute numeric missing values using median/mean/constant, ",
           "or impute categorical missing values using mode/new category/constant.")
   })
   
-  output$report_outlier_strategy <- renderText({ 
+  output$intro_outlier_strategy <- renderText({ 
     paste("Outlier detection using multiple methods: Mahalanobis Distance, Cook's Distance, ",
           "Local Outlier Factor (LOF), One-Class SVM, Random Forest Residuals, and Isolation Forest. ",
           "Users can adjust thresholds and view consensus across methods.")
   })
   
-  output$report_preprocess_strategy <- renderText({ 
+  output$intro_preprocess_strategy <- renderText({ 
     paste("Data preprocessing includes missing value imputation, transformation options (log, sqrt, Box-Cox, Yeo-Johnson), ",
           "scaling/centering, and a pipeline builder for reproducible processing steps.")
   })
   
-  output$report_glmnet_explanation <- renderText({ 
+  output$intro_glmnet_explanation <- renderText({ 
     paste("GLMNET (Elastic Net) combines L1 (Lasso) and L2 (Ridge) regularization. ",
           "Alpha controls the mix (0 = Ridge, 1 = Lasso). ",
           "Cross-validation selects the optimal lambda parameter to balance bias and variance.")
   })
   
-  output$report_model_performance <- renderText({ 
-    res <- model_results()
-    if(is.null(res)) return("Train a model in the GLMNET Modeling tab to see performance metrics.")
-    paste("Model trained with", length(res$predictors), "predictors. ",
-          "Test RMSE =", round(res$test_rmse, 4), 
-          ", Test R² =", round(res$test_r2, 4), ".")
-  })
   
-  output$report_residual_summary <- renderText({ 
-    res <- model_results()
-    if(is.null(res) || is.null(res$test_pred)) return("Train a model first to see residual analysis.")
-    residuals <- res$y_test - res$test_pred
-    paste("Test residuals analysis: mean =", round(mean(residuals), 4), 
-          ", sd =", round(sd(residuals), 4),
-          ", min =", round(min(residuals), 4), 
-          ", max =", round(max(residuals), 4), ".")
-  })
+  # ========================================================================
+  # ========================================================================
+  # SECTION 13: GLMNET MODELING OUTPUTS
+  # ========================================================================
+  # ========================================================================
   
-  
-  # ============================================================================
-  # ============================================================================
-  # SECTION 9: GLMNET MODELING OUTPUTS
-  # ============================================================================
-  # ============================================================================
-  
-  model_ready_data <- reactive({
-    ds_name <- selected_model_dataset()
-    if(!is.null(ds_name) && ds_name %in% names(saved_datasets())) {
-      return(saved_datasets()[[ds_name]]$data)
-    }
-    return(processed_data_working())
-  })
-  
-  observe({
-    # Determine which data to use based on selection
-    if(input$model_data_source == "saved" && !is.null(selected_model_dataset()) && selected_model_dataset() %in% names(saved_datasets())) {
-      # Use saved dataset
-      data <- saved_datasets()[[selected_model_dataset()]]$data
-      showNotification(paste("Using saved dataset:", selected_model_dataset()), type = "message", duration = 3)
-    } else if(input$model_data_source == "processed") {
-      # Use current processed data (already standardized)
-      data <- processed_data_working()
-    } else {
-      # Use original data with standardization
-      data <- standardize_missing(df)
-    }
-    
-    # Ensure DEATH_RATE is numeric
-    if("DEATH_RATE" %in% names(data) && is.character(data$DEATH_RATE)) {
-      data$DEATH_RATE[data$DEATH_RATE %in% c("-99", "--", "NA")] <- NA
-      data$DEATH_RATE <- suppressWarnings(as.numeric(data$DEATH_RATE))
-    }
-    
-    # Remove rows with NA in DEATH_RATE
-    data <- data[!is.na(data$DEATH_RATE), ]
-    
-    # Create train/test split
-    if("OBS_TYPE" %in% names(data)) {
-      train_idx <- which(data$OBS_TYPE == "Train")
-      test_idx <- which(data$OBS_TYPE == "Test")
-      if(length(train_idx) == 0 || length(test_idx) == 0) {
+  # Data Preparation and Train/Test Split
+  observeEvent(
+    list(input$model_data_source, input$model_dataset_select, processed_data_working()),
+    {
+      req(input$model_data_source)
+      
+      if(input$model_data_source == "saved") {
+        ds_name <- input$model_dataset_select
+        if(!is.null(ds_name) && ds_name != "" && ds_name %in% names(saved_datasets())) {
+          data <- saved_datasets()[[ds_name]]$data
+        } else {
+          data <- standardize_missing(df)
+          showNotification("No saved dataset selected. Using original data.", type = "warning")
+        }
+      } else {
+        data <- standardize_missing(df)
+      }
+      
+      if("DEATH_RATE" %in% names(data) && is.character(data$DEATH_RATE)) {
+        data$DEATH_RATE[data$DEATH_RATE %in% c("-99", "--", "NA")] <- NA
+        data$DEATH_RATE <- suppressWarnings(as.numeric(data$DEATH_RATE))
+      }
+      
+      data <- data[!is.na(data$DEATH_RATE), ]
+      
+      if("OBS_TYPE" %in% names(data)) {
+        train_idx <- which(trimws(as.character(data$OBS_TYPE)) == "Train")
+        test_idx  <- which(trimws(as.character(data$OBS_TYPE)) == "Test")
+        if(length(train_idx) == 0 || length(test_idx) == 0) {
+          set.seed(123)
+          train_idx <- sample(1:nrow(data), 0.7 * nrow(data))
+          test_idx  <- setdiff(1:nrow(data), train_idx)
+          showNotification("OBS_TYPE column missing Train/Test values. Using random 70/30 split.", type = "warning")
+        }
+      } else {
         set.seed(123)
         train_idx <- sample(1:nrow(data), 0.7 * nrow(data))
-        test_idx <- setdiff(1:nrow(data), train_idx)
-        showNotification("OBS_TYPE column missing Train/Test values. Using random 70/30 split.", type = "warning")
+        test_idx  <- setdiff(1:nrow(data), train_idx)
       }
-    } else {
-      set.seed(123)
-      train_idx <- sample(1:nrow(data), 0.7 * nrow(data))
-      test_idx <- setdiff(1:nrow(data), train_idx)
+      
+      train_test_split(list(train = data[train_idx, ], test = data[test_idx, ]))
+    },
+    ignoreNULL = TRUE,
+    ignoreInit = FALSE
+  )
+  
+  # Model Training Observer
+  observeEvent(input$train_model, {
+    showNotification("Starting model training...", type = "message", duration = 3)
+    
+    if(is.null(train_test_split())) {
+      showNotification("No train/test split available. Please check your data source.", type = "error")
+      return()
     }
     
-    train_test_split(list(train = data[train_idx, ], test = data[test_idx, ]))
-  })
-  
-  observeEvent(input$train_model, {
-    req(!is.null(train_test_split()))
     split <- train_test_split()
-    req(!is.null(split))
+    
+    if(is.null(split) || is.null(split$train) || is.null(split$test)) {
+      showNotification("Train/test split is invalid. Please check your data.", type = "error")
+      return()
+    }
+    
     train_data <- split$train
     test_data <- split$test
     
@@ -5563,91 +5406,120 @@ server <- function(input, output, session) {
     
     predictor_vars <- setdiff(names(train_data), c("DEATH_RATE", "CODE", "OBS_TYPE"))
     is_numeric <- sapply(train_data[, predictor_vars, drop = FALSE], is.numeric)
-    is_numeric[is.na(is_numeric)] <- FALSE
     predictor_vars <- predictor_vars[is_numeric]
     
-    if(length(predictor_vars) > 0) {
-      not_all_na <- sapply(train_data[, predictor_vars, drop = FALSE], function(x) { result <- !all(is.na(x)); if(is.na(result)) result <- FALSE; return(result) })
-      predictor_vars <- predictor_vars[not_all_na]
-    }
-    
     if(length(predictor_vars) == 0) {
-      showNotification("No valid numeric predictors found. Check your data for NA values or select different data source.", type = "error")
+      showNotification("No valid numeric predictors found. Please check your data.", type = "error")
       return()
-    }
-    
-    X_train <- tryCatch({ as.matrix(train_data[, predictor_vars, drop = FALSE]) }, error = function(e) { showNotification(paste("Error creating predictor matrix:", e$message), type = "error"); return(NULL) })
-    y_train <- train_data$DEATH_RATE
-    
-    if(is.null(X_train)) return()
-    
-    complete_train <- tryCatch({ complete.cases(X_train, y_train) }, error = function(e) { showNotification(paste("Error checking complete cases:", e$message), type = "error"); return(rep(FALSE, nrow(X_train))) })
-    
-    if(sum(complete_train, na.rm = TRUE) < 10) {
-      showNotification(paste("Insufficient complete cases:", sum(complete_train, na.rm = TRUE), "Need at least 10."), type = "error")
-      return()
-    }
-    
-    X_train <- X_train[complete_train, , drop = FALSE]
-    y_train <- y_train[complete_train]
-    
-    X_test <- tryCatch({ as.matrix(test_data[, predictor_vars, drop = FALSE]) }, error = function(e) { showNotification(paste("Error creating test matrix:", e$message), type = "warning"); return(NULL) })
-    y_test <- test_data$DEATH_RATE
-    
-    if(!is.null(X_test)) {
-      complete_test <- complete.cases(X_test, y_test)
-      if(sum(complete_test, na.rm = TRUE) > 0) {
-        X_test <- X_test[complete_test, , drop = FALSE]
-        y_test <- y_test[complete_test]
-      } else {
-        X_test <- NULL; y_test <- NULL
-      }
     }
     
     tryCatch({
-      set.seed(input$cv_seed)
-      cv_model <- cv.glmnet(X_train, y_train, alpha = as.numeric(input$glmnet_alpha), nfolds = min(input$cv_folds, nrow(X_train) - 1))
-      lambda_opt <- if(is.null(input$glmnet_lambda) || is.na(input$glmnet_lambda) || input$glmnet_lambda == 0) { cv_model$lambda.min } else { input$glmnet_lambda }
-      final_model <- glmnet(X_train, y_train, alpha = as.numeric(input$glmnet_alpha), lambda = lambda_opt)
-      train_pred <- predict(final_model, newx = X_train)
+      X_train <- as.matrix(train_data[, predictor_vars, drop = FALSE])
+      y_train <- train_data$DEATH_RATE
       
-      if(!is.null(X_test) && length(y_test) > 0) {
-        test_pred <- predict(final_model, newx = X_test)
-        test_rmse <- sqrt(mean((y_test - test_pred)^2))
-        test_r2 <- 1 - sum((y_test - test_pred)^2) / sum((y_test - mean(y_test))^2)
-      } else {
-        test_pred <- NULL; test_rmse <- NA; test_r2 <- NA
-        showNotification("No valid test data available. Using training data only.", type = "warning")
+      complete_train <- complete.cases(X_train, y_train)
+      
+      if(sum(complete_train) < 10) {
+        showNotification(paste("Insufficient complete cases:", sum(complete_train), "Need at least 10."), type = "error")
+        return()
       }
       
+      X_train <- X_train[complete_train, , drop = FALSE]
+      y_train <- y_train[complete_train]
+      
+      # Prepare test data
+      X_test <- NULL
+      y_test <- NULL
+      
+      if(!is.null(test_data) && nrow(test_data) > 0) {
+        X_test <- tryCatch({
+          as.matrix(test_data[, predictor_vars, drop = FALSE])
+        }, error = function(e) NULL)
+        
+        if(!is.null(X_test)) {
+          y_test <- test_data$DEATH_RATE
+          complete_test <- complete.cases(X_test, y_test)
+          if(sum(complete_test) > 0) {
+            X_test <- X_test[complete_test, , drop = FALSE]
+            y_test <- y_test[complete_test]
+          } else {
+            X_test <- NULL
+            y_test <- NULL
+          }
+        }
+      }
+      
+      set.seed(input$cv_seed %||% 123)
+      alpha_val <- as.numeric(input$glmnet_alpha %||% 0.5)
+      if(is.na(alpha_val)) alpha_val <- 0.5
+      
+      nfolds <- min(input$cv_folds %||% 5, nrow(X_train) - 1)
+      if(nfolds < 3) nfolds <- 3
+      
+      cv_model <- cv.glmnet(X_train, y_train, alpha = alpha_val, nfolds = nfolds)
+      
+      lambda_input <- input$glmnet_lambda %||% 0
+      if(is.null(lambda_input) || is.na(lambda_input) || lambda_input == "" || lambda_input == 0) {
+        lambda_opt <- cv_model$lambda.min
+      } else {
+        lambda_opt <- as.numeric(lambda_input)
+      }
+      
+      final_model <- glmnet(X_train, y_train, alpha = alpha_val, lambda = lambda_opt)
+      
+      train_pred <- as.numeric(predict(final_model, newx = X_train))
       train_rmse <- sqrt(mean((y_train - train_pred)^2))
       train_r2 <- 1 - sum((y_train - train_pred)^2) / sum((y_train - mean(y_train))^2)
       
-      model_results(list(model = final_model, cv_model = cv_model, train_pred = as.numeric(train_pred),
-                         test_pred = if(!is.null(test_pred)) as.numeric(test_pred) else NULL,
-                         y_train = y_train, y_test = y_test, lambda_opt = lambda_opt, lambda_min = cv_model$lambda.min,
-                         lambda_1se = cv_model$lambda.1se, train_rmse = train_rmse, test_rmse = test_rmse,
-                         train_r2 = train_r2, test_r2 = test_r2, predictors = predictor_vars, data_source = input$model_data_source))
+      test_pred <- NULL
+      test_rmse <- NA
+      test_r2 <- NA
       
-      showNotification(paste("Model trained! Test RMSE:", ifelse(is.na(test_rmse), "N/A", round(test_rmse, 4))), type = "message", duration = 5)
+      if(!is.null(X_test) && length(y_test) > 0) {
+        test_pred <- as.numeric(predict(final_model, newx = X_test))
+        test_rmse <- sqrt(mean((y_test - test_pred)^2))
+        test_r2 <- 1 - sum((y_test - test_pred)^2) / sum((y_test - mean(y_test))^2)
+      }
       
-    }, error = function(e) { showNotification(paste("Model training error:", e$message), type = "error", duration = 8) })
+      model_results(list(
+        model = final_model,
+        cv_model = cv_model,
+        train_pred = train_pred,
+        test_pred = test_pred,
+        y_train = y_train,
+        y_test = y_test,
+        lambda_opt = lambda_opt,
+        lambda_min = cv_model$lambda.min,
+        lambda_1se = cv_model$lambda.1se,
+        train_rmse = train_rmse,
+        test_rmse = test_rmse,
+        train_r2 = train_r2,
+        test_r2 = test_r2,
+        predictors = predictor_vars,
+        data_source = input$model_data_source %||% "original"
+      ))
+      
+      showNotification(paste("Model trained successfully! Test RMSE:", 
+                             ifelse(is.na(test_rmse), "N/A", round(test_rmse, 4))), 
+                       type = "message", duration = 5)
+      
+    }, error = function(e) {
+      showNotification(paste("Model training error:", e$message), type = "error", duration = 8)
+    })
   })
   
+  # Model Performance Outputs
   output$model_performance <- renderPrint({
     res <- model_results()
     if(is.null(res)) { cat("No model trained yet.\n\nSelect data source and click 'Train GLMNET Model'"); return() }
     
-    data_source_display <- switch(res$data_source, "original" = "ORIGINAL DATA", "processed" = "PROCESSED DATA (Tab 2)", "recipe" = "RECIPE DATA (Tab 3)", toupper(res$data_source))
-    
     cat("GLMNET Model Performance\n========================\n\n")
-    cat("Data Source:", data_source_display, "\n")
     cat("Predictors:", length(res$predictors), "\n")
     cat("Training observations:", length(res$y_train), "\n")
-    if(!is.null(res$y_test) && length(res$y_test) > 0) cat("Test observations:", length(res$y_test), "\n") else cat("Test observations: None available\n")
+    if(!is.null(res$y_test) && length(res$y_test) > 0) cat("Test observations:", length(res$y_test), "\n")
     cat("\nTRAIN SET:\n  RMSE:", round(res$train_rmse, 4), "\n  R²:", round(res$train_r2, 4), "\n\n")
     cat("TEST SET:\n")
-    if(!is.na(res$test_rmse)) cat("  RMSE:", round(res$test_rmse, 4), "\n  R²:", round(res$test_r2, 4), "\n") else cat("  No test results available\n")
+    if(!is.na(res$test_rmse)) cat("  RMSE:", round(res$test_rmse, 4), "\n  R²:", round(res$test_r2, 4), "\n")
   })
   
   output$model_hyperparameters <- renderPrint({
@@ -5671,175 +5543,179 @@ server <- function(input, output, session) {
     coef_df <- coef_df[coef_df$Variable != "(Intercept)", ]
     coef_df <- coef_df[order(-abs(coef_df$Coefficient)), ]
     
-    zero_count <- sum(coef_df$Coefficient == 0)
-    nonzero_count <- nrow(coef_df) - zero_count
-    
-    datatable(coef_df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE,
-              caption = htmltools::tags$caption(style = 'caption-side: bottom; text-align: center;',
-                                                paste0(nonzero_count, " non-zero coefficients | ", zero_count, " zero coefficients"))) %>%
-      formatRound("Coefficient", digits = 4) %>%
-      formatStyle("Coefficient", background = styleColorBar(c(-1, 1), 'lightblue'),
-                  backgroundSize = '100% 90%', backgroundRepeat = 'no-repeat', backgroundPosition = 'center')
+    datatable(coef_df, 
+              options = list(pageLength = nrow(coef_df), scrollX = TRUE, dom = 't'), 
+              rownames = FALSE) %>%
+      formatRound("Coefficient", digits = 4)
   })
   
   output$coef_plot <- renderPlotly({
     res <- model_results()
-    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained", x = 0.5, y = 0.5))
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained"))
     
     coef_matrix <- as.matrix(coef(res$model))
     coef_df <- data.frame(Variable = rownames(coef_matrix), Coefficient = as.numeric(coef_matrix[, 1]))
     coef_df <- coef_df[coef_df$Variable != "(Intercept)", ]
     coef_df <- coef_df[order(coef_df$Coefficient), ]
     
-    colors <- ifelse(coef_df$Coefficient > 0, "#ADD8E6", "coral")
+    colors <- ifelse(coef_df$Coefficient > 0, "#13D4D4", "#e74c3c")
     
     plot_ly(coef_df, x = ~Coefficient, y = ~reorder(Variable, Coefficient), type = "bar", orientation = "h",
             marker = list(color = colors), text = ~paste(Variable, ": ", round(Coefficient, 4)), hoverinfo = "text") %>%
-      layout(title = "Coefficient Estimates", xaxis = list(title = "Coefficient Value", gridcolor = "lightgray"),
-             yaxis = list(title = "", gridcolor = "lightgray"), plot_bgcolor = "white", margin = list(l = 120))
+      layout(title = "Coefficient Estimates", xaxis = list(title = "Coefficient Value"),
+             yaxis = list(title = ""), margin = list(l = 120))
   })
   
   output$predictions_plot <- renderPlotly({
     res <- model_results()
-    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained", x = 0.5, y = 0.5))
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained"))
     
     split <- train_test_split()
-    if(is.null(split)) return(plot_ly() %>% add_annotations(text = "No train/test split available", x = 0.5, y = 0.5))
+    if(is.null(split)) return(plot_ly() %>% add_annotations(text = "No train/test split"))
     
-    train_data <- split$train
-    test_data <- split$test
+    dataset_choice <- input$predictions_dataset %||% "both"
+    plot_df <- data.frame()
     
-    # Get CODE values safely
-    train_codes <- tryCatch({
-      complete_idx <- complete.cases(train_data[, res$predictors, drop = FALSE])
-      codes <- as.character(train_data$CODE[complete_idx])
-      if(length(codes) > length(res$train_pred)) codes[1:length(res$train_pred)] else codes
-    }, error = function(e) rep("Unknown", length(res$train_pred)))
-    
-    test_codes <- tryCatch({
-      if(!is.null(res$test_pred) && length(res$test_pred) > 0) {
-        complete_idx <- complete.cases(test_data[, res$predictors, drop = FALSE])
-        codes <- as.character(test_data$CODE[complete_idx])
-        if(length(codes) > length(res$test_pred)) codes[1:length(res$test_pred)] else codes
-      } else {
-        character(0)
-      }
-    }, error = function(e) rep("Unknown", length(res$test_pred)))
-    
-    # Build the plot data frame safely
-    plot_df <- data.frame(
-      Actual = c(res$y_train, if(!is.null(res$y_test)) res$y_test else numeric(0)),
-      Predicted = c(res$train_pred, if(!is.null(res$test_pred)) res$test_pred else numeric(0)),
-      Set = c(rep("Train", length(res$y_train)), if(!is.null(res$y_test)) rep("Test", length(res$y_test)) else character(0)),
-      CODE = c(train_codes, if(length(test_codes) > 0) test_codes else character(0)),
-      stringsAsFactors = FALSE
-    )
-    
-    # Remove any rows with NA
-    plot_df <- na.omit(plot_df)
-    
-    if(nrow(plot_df) == 0) {
-      return(plot_ly() %>% add_annotations(text = "No valid prediction data available", x = 0.5, y = 0.5))
-    }
-    
-    p <- ggplot(plot_df, aes(x = Actual, y = Predicted, color = Set, 
-                             text = paste("CODE:", CODE, "<br>Set:", Set, "<br>Actual:", round(Actual, 3), "<br>Predicted:", round(Predicted, 3)))) +
-      geom_point(alpha = 0.6, size = 2) + 
-      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50", size = 1) +
-      labs(title = "Predictions vs Actual Values", x = "Actual Death Rate", y = "Predicted Death Rate") +
-      theme_minimal() + 
-      theme(plot.title = element_text(hjust = 0.5, face = "bold"))
-    
-    ggplotly(p, tooltip = "text") %>% layout(hoverlabel = list(bgcolor = "white", font = list(size = 10)))
-  })
-  
-  
-  output$residual_plot <- renderPlotly({
-    res <- model_results()
-    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained", x = 0.5, y = 0.5))
-    
-    split <- train_test_split()
-    if(is.null(split)) return(plot_ly() %>% add_annotations(text = "No train/test split available", x = 0.5, y = 0.5))
-    
-    train_residuals <- res$y_train - res$train_pred
-    
-    # Get train codes safely
-    train_codes <- tryCatch({
-      complete_idx <- complete.cases(split$train[, res$predictors, drop = FALSE])
-      codes <- as.character(split$train$CODE[complete_idx])
-      if(length(codes) > length(train_residuals)) codes[1:length(train_residuals)] else codes
-    }, error = function(e) rep("Unknown", length(train_residuals)))
-    
-    plot_df <- data.frame(
-      Residuals = train_residuals,
-      Set = "Train",
-      Predicted = res$train_pred,
-      CODE = train_codes,
-      stringsAsFactors = FALSE
-    )
-    
-    if(!is.null(res$test_pred) && length(res$test_pred) > 0) {
-      test_residuals <- res$y_test - res$test_pred
-      test_codes <- tryCatch({
-        complete_idx <- complete.cases(split$test[, res$predictors, drop = FALSE])
-        codes <- as.character(split$test$CODE[complete_idx])
-        if(length(codes) > length(test_residuals)) codes[1:length(test_residuals)] else codes
-      }, error = function(e) rep("Unknown", length(test_residuals)))
+    if(dataset_choice %in% c("train", "both")) {
+      train_codes <- tryCatch({
+        complete_idx <- complete.cases(split$train[, res$predictors, drop = FALSE])
+        as.character(split$train$CODE[complete_idx])
+      }, error = function(e) rep("Unknown", length(res$train_pred)))
       
       plot_df <- rbind(plot_df, data.frame(
-        Residuals = test_residuals,
-        Set = "Test",
-        Predicted = res$test_pred,
-        CODE = test_codes,
-        stringsAsFactors = FALSE
+        Actual = res$y_train, Predicted = res$train_pred, Set = "Train", CODE = train_codes
       ))
     }
     
-    # Remove NA rows
-    plot_df <- na.omit(plot_df)
-    
-    if(nrow(plot_df) == 0) {
-      return(plot_ly() %>% add_annotations(text = "No valid residual data available", x = 0.5, y = 0.5))
+    if(dataset_choice %in% c("test", "both") && !is.null(res$test_pred) && length(res$test_pred) > 0) {
+      test_codes <- tryCatch({
+        complete_idx <- complete.cases(split$test[, res$predictors, drop = FALSE])
+        as.character(split$test$CODE[complete_idx])
+      }, error = function(e) rep("Unknown", length(res$test_pred)))
+      
+      plot_df <- rbind(plot_df, data.frame(
+        Actual = res$y_test, Predicted = res$test_pred, Set = "Test", CODE = test_codes
+      ))
     }
     
-    p <- ggplot(plot_df, aes(x = Predicted, y = Residuals, color = Set, 
-                             text = paste("CODE:", CODE, "<br>Predicted:", round(Predicted, 3), "<br>Residual:", round(Residuals, 3)))) +
-      geom_point(alpha = 0.6, size = 2) + 
-      geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", size = 1) +
-      labs(title = "Residuals vs Fitted Values", x = "Predicted Death Rate", y = "Residuals") +
-      theme_minimal() + 
-      theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+    plot_df <- na.omit(plot_df)
+    if(nrow(plot_df) == 0) return(plot_ly() %>% add_annotations(text = "No valid data"))
     
-    ggplotly(p, tooltip = "text") %>% layout(hoverlabel = list(bgcolor = "white", font = list(size = 10)))
+    p <- ggplot(plot_df, aes(x = Actual, y = Predicted, color = Set,
+                             text = paste("CODE:", CODE, "<br>Actual:", round(Actual, 3),
+                                          "<br>Predicted:", round(Predicted, 3)))) +
+      geom_point(alpha = 0.6, size = 2.5) + 
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+      scale_color_manual(values = c("Train" = "#13D4D4", "Test" = "#e74c3c")) +
+      labs(title = "Predictions vs Actual Values", x = "Actual Death Rate", y = "Predicted Death Rate") +
+      theme_minimal()
+    
+    ggplotly(p, tooltip = "text")
   })
   
   output$predictions_summary <- renderPrint({
     res <- model_results()
-    if(is.null(res)) { cat("No model trained yet."); return() }
+    if(is.null(res)) { 
+      cat("No model trained yet.\n\nSelect data source and click 'Train GLMNET Model'")
+      return() 
+    }
+    
     cat("Predictions Summary\n==================\n\n")
-    cat("TRAIN SET:\n  Min:", round(min(res$train_pred), 4), "\n  Max:", round(max(res$train_pred), 4),
-        "\n  Mean:", round(mean(res$train_pred), 4), "\n  SD:", round(sd(res$train_pred), 4), "\n\n")
+    cat("TRAIN SET:\n")
+    cat("  Min:", round(min(res$train_pred), 4), "\n")
+    cat("  Max:", round(max(res$train_pred), 4), "\n")
+    cat("  Mean:", round(mean(res$train_pred), 4), "\n")
+    cat("  SD:", round(sd(res$train_pred), 4), "\n\n")
+    
     if(!is.null(res$test_pred) && length(res$test_pred) > 0) {
-      cat("TEST SET:\n  Min:", round(min(res$test_pred), 4), "\n  Max:", round(max(res$test_pred), 4),
-          "\n  Mean:", round(mean(res$test_pred), 4), "\n  SD:", round(sd(res$test_pred), 4), "\n")
-    } else { cat("TEST SET: No predictions available\n") }
+      cat("TEST SET:\n")
+      cat("  Min:", round(min(res$test_pred), 4), "\n")
+      cat("  Max:", round(max(res$test_pred), 4), "\n")
+      cat("  Mean:", round(mean(res$test_pred), 4), "\n")
+      cat("  SD:", round(sd(res$test_pred), 4), "\n")
+    } else { 
+      cat("TEST SET: No predictions available\n") 
+    }
+  })
+  
+  output$residual_plot <- renderPlotly({
+    res <- model_results()
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained"))
+    
+    split <- train_test_split()
+    if(is.null(split)) return(plot_ly() %>% add_annotations(text = "No train/test split"))
+    
+    dataset_choice <- input$residual_display_dataset %||% "both"
+    plot_df <- data.frame()
+    
+    if(dataset_choice %in% c("train", "both")) {
+      train_residuals <- res$y_train - res$train_pred
+      train_codes <- tryCatch({
+        complete_idx <- complete.cases(split$train[, res$predictors, drop = FALSE])
+        as.character(split$train$CODE[complete_idx])
+      }, error = function(e) rep("Unknown", length(train_residuals)))
+      
+      plot_df <- rbind(plot_df, data.frame(
+        Residuals = train_residuals, Set = "Train", Predicted = res$train_pred, CODE = train_codes
+      ))
+    }
+    
+    if(dataset_choice %in% c("test", "both") && !is.null(res$test_pred) && length(res$test_pred) > 0) {
+      test_residuals <- res$y_test - res$test_pred
+      test_codes <- tryCatch({
+        complete_idx <- complete.cases(split$test[, res$predictors, drop = FALSE])
+        as.character(split$test$CODE[complete_idx])
+      }, error = function(e) rep("Unknown", length(test_residuals)))
+      
+      plot_df <- rbind(plot_df, data.frame(
+        Residuals = test_residuals, Set = "Test", Predicted = res$test_pred, CODE = test_codes
+      ))
+    }
+    
+    plot_df <- na.omit(plot_df)
+    if(nrow(plot_df) == 0) return(plot_ly() %>% add_annotations(text = "No valid data"))
+    
+    p <- ggplot(plot_df, aes(x = Predicted, y = Residuals, color = Set,
+                             text = paste("CODE:", CODE, "<br>Predicted:", round(Predicted, 3),
+                                          "<br>Residual:", round(Residuals, 3)))) +
+      geom_point(alpha = 0.6, size = 2) + 
+      geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+      scale_color_manual(values = c("Train" = "#13D4D4", "Test" = "#e74c3c")) +
+      labs(title = "Residuals vs Fitted Values", x = "Predicted Death Rate", y = "Residuals") +
+      theme_minimal()
+    
+    ggplotly(p, tooltip = "text")
   })
   
   output$residual_stats <- renderPrint({
     res <- model_results()
-    if(is.null(res)) { cat("No model trained yet."); return() }
+    if(is.null(res)) { 
+      cat("No model trained yet.")
+      return() 
+    }
+    
     train_residuals <- res$y_train - res$train_pred
     cat("Residual Analysis\n=================\n\n")
-    cat("TRAIN SET:\n  Min:", round(min(train_residuals), 4), "\n  Max:", round(max(train_residuals), 4),
-        "\n  Mean:", round(mean(train_residuals), 4), "\n  SD:", round(sd(train_residuals), 4),
-        "\n  Q1:", round(quantile(train_residuals, 0.25), 4), "\n  Median:", round(median(train_residuals), 4),
-        "\n  Q3:", round(quantile(train_residuals, 0.75), 4), "\n\n")
+    
+    cat("TRAIN SET:\n")
+    cat("  Min:", round(min(train_residuals), 4), "\n")
+    cat("  Max:", round(max(train_residuals), 4), "\n")
+    cat("  Mean:", round(mean(train_residuals), 4), "\n")
+    cat("  SD:", round(sd(train_residuals), 4), "\n")
+    cat("  Q1:", round(quantile(train_residuals, 0.25), 4), "\n")
+    cat("  Median:", round(median(train_residuals), 4), "\n")
+    cat("  Q3:", round(quantile(train_residuals, 0.75), 4), "\n\n")
+    
     if(!is.null(res$test_pred) && length(res$test_pred) > 0) {
       test_residuals <- res$y_test - res$test_pred
-      cat("TEST SET:\n  Min:", round(min(test_residuals), 4), "\n  Max:", round(max(test_residuals), 4),
-          "\n  Mean:", round(mean(test_residuals), 4), "\n  SD:", round(sd(test_residuals), 4),
-          "\n  Q1:", round(quantile(test_residuals, 0.25), 4), "\n  Median:", round(median(test_residuals), 4),
-          "\n  Q3:", round(quantile(test_residuals, 0.75), 4), "\n")
+      cat("TEST SET:\n")
+      cat("  Min:", round(min(test_residuals), 4), "\n")
+      cat("  Max:", round(max(test_residuals), 4), "\n")
+      cat("  Mean:", round(mean(test_residuals), 4), "\n")
+      cat("  SD:", round(sd(test_residuals), 4), "\n")
+      cat("  Q1:", round(quantile(test_residuals, 0.25), 4), "\n")
+      cat("  Median:", round(median(test_residuals), 4), "\n")
+      cat("  Q3:", round(quantile(test_residuals, 0.75), 4), "\n")
     }
   })
   
@@ -5850,33 +5726,28 @@ server <- function(input, output, session) {
     }
     
     residuals <- res$y_test - res$test_pred
-    Q1 <- quantile(residuals, 0.25, na.rm = TRUE); Q3 <- quantile(residuals, 0.75, na.rm = TRUE)
+    Q1 <- quantile(residuals, 0.25, na.rm = TRUE)
+    Q3 <- quantile(residuals, 0.75, na.rm = TRUE)
     IQR <- Q3 - Q1
-    lower_bound <- Q1 - input$residual_iqr * IQR; upper_bound <- Q3 + input$residual_iqr * IQR
+    iqr_mult_val <- input$residual_iqr %||% 1.5
+    lower_bound <- Q1 - iqr_mult_val * IQR
+    upper_bound <- Q3 + iqr_mult_val * IQR
     outlier_idx <- which(residuals < lower_bound | residuals > upper_bound)
     
     if(length(outlier_idx) == 0) {
-      return(datatable(data.frame(Message = paste("No outliers detected with IQR multiplier =", input$residual_iqr))))
+      return(datatable(data.frame(Message = paste("No outliers detected with IQR multiplier =", iqr_mult_val))))
     }
     
-    # Get the CODE values for the outlier observations
-    # Need to access the original test data to get CODE
     split <- train_test_split()
     if(!is.null(split) && !is.null(split$test)) {
       test_data <- split$test
-      # Get the predictor variables used in the model
       predictor_vars <- res$predictors
-      # Find complete cases in test data
       complete_test <- complete.cases(test_data[, predictor_vars, drop = FALSE])
       test_data_complete <- test_data[complete_test, ]
       
-      # Get CODE values for outlier indices
       outlier_codes <- test_data_complete$CODE[outlier_idx]
-      # If CODE is missing or not available, use index as fallback
       if(is.null(outlier_codes) || length(outlier_codes) != length(outlier_idx)) {
         outlier_codes <- outlier_idx
-      } else if(any(is.na(outlier_codes))) {
-        outlier_codes[is.na(outlier_codes)] <- outlier_idx[is.na(outlier_codes)]
       }
     } else {
       outlier_codes <- outlier_idx
@@ -5890,35 +5761,267 @@ server <- function(input, output, session) {
       Std_Residual = round(residuals[outlier_idx] / sd(residuals, na.rm = TRUE), 3)
     )
     
-    datatable(outlier_df, options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE,
-              caption = paste("Total outliers:", length(outlier_idx), "(", round(100 * length(outlier_idx) / length(residuals), 1), "% of test data)")) %>%
-      formatStyle("Residual", backgroundColor = styleInterval(c(lower_bound, upper_bound), c("white", "#ffcccc", "white")))
+    datatable(outlier_df, options = list(scrollX = TRUE, dom = 'frtip'), rownames = FALSE,
+              caption = paste("Total outliers:", length(outlier_idx), "(", round(100 * length(outlier_idx) / length(residuals), 1), "% of test data)"))
+  })
+  
+  output$residual_boxplot <- renderPlotly({
+    res <- model_results()
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "No model trained"))
+    
+    split <- train_test_split()
+    if(is.null(split)) return(plot_ly() %>% add_annotations(text = "No train/test split"))
+    
+    dataset_choice <- input$residual_dataset %||% "both"
+    iqr_mult <- input$residual_boxplot_iqr %||% 1.5
+    
+    plot_data <- data.frame()
+    
+    if(dataset_choice %in% c("train", "both")) {
+      train_residuals <- res$y_train - res$train_pred
+      train_codes <- tryCatch({
+        complete_idx <- complete.cases(split$train[, res$predictors, drop = FALSE])
+        as.character(split$train$CODE[complete_idx])
+      }, error = function(e) rep("Unknown", length(train_residuals)))
+      
+      train_df <- data.frame(
+        Residual = train_residuals,
+        Dataset = "Train",
+        CODE = train_codes,
+        Predicted = res$train_pred,
+        Actual = res$y_train
+      )
+      plot_data <- rbind(plot_data, train_df)
+    }
+    
+    if(dataset_choice %in% c("test", "both") && !is.null(res$test_pred) && length(res$test_pred) > 0) {
+      test_residuals <- res$y_test - res$test_pred
+      test_codes <- tryCatch({
+        complete_idx <- complete.cases(split$test[, res$predictors, drop = FALSE])
+        as.character(split$test$CODE[complete_idx])
+      }, error = function(e) rep("Unknown", length(test_residuals)))
+      
+      test_df <- data.frame(
+        Residual = test_residuals,
+        Dataset = "Test",
+        CODE = test_codes,
+        Predicted = res$test_pred,
+        Actual = res$y_test
+      )
+      plot_data <- rbind(plot_data, test_df)
+    }
+    
+    plot_data <- na.omit(plot_data)
+    if(nrow(plot_data) == 0) return(plot_ly() %>% add_annotations(text = "No valid data"))
+    
+    plot_data$IsOutlier <- FALSE
+    for(ds in unique(plot_data$Dataset)) {
+      ds_idx <- plot_data$Dataset == ds
+      if(sum(ds_idx) > 0) {
+        Q1 <- quantile(plot_data$Residual[ds_idx], 0.25, na.rm = TRUE)
+        Q3 <- quantile(plot_data$Residual[ds_idx], 0.75, na.rm = TRUE)
+        IQR_val <- Q3 - Q1
+        lower_bound <- Q1 - iqr_mult * IQR_val
+        upper_bound <- Q3 + iqr_mult * IQR_val
+        plot_data$IsOutlier[ds_idx] <- plot_data$Residual[ds_idx] < lower_bound | 
+          plot_data$Residual[ds_idx] > upper_bound
+      }
+    }
+    
+    p <- ggplot(plot_data, aes(x = Dataset, y = Residual, fill = Dataset,
+                               text = paste("CODE:", CODE, "<br>Dataset:", Dataset,
+                                            "<br>Residual:", round(Residual, 4),
+                                            "<br>Predicted:", round(Predicted, 4),
+                                            "<br>Actual:", round(Actual, 4),
+                                            "<br>Outlier:", IsOutlier))) +
+      geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+      geom_point(aes(color = IsOutlier), position = position_jitter(width = 0.2), 
+                 size = 2, alpha = 0.6) +
+      scale_color_manual(values = c("FALSE" = "#2C3E50", "TRUE" = "#e74c3c")) +
+      scale_fill_manual(values = c("Train" = "#13D4D4", "Test" = "#e74c3c")) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+      labs(title = paste("Residual Distribution -", 
+                         switch(dataset_choice, train = "Train Set", test = "Test Set", both = "Train + Test Sets")),
+           subtitle = paste("IQR Multiplier:", iqr_mult, "| Total outliers:", sum(plot_data$IsOutlier)),
+           y = "Residuals", x = "Dataset") +
+      theme_minimal() +
+      theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+            legend.position = "bottom")
+    
+    ggplotly(p, tooltip = "text") %>% 
+      layout(hoverlabel = list(bgcolor = "white", font = list(size = 10)))
+  })
+  
+  output$residual_boxplot_stats <- renderPrint({
+    res <- model_results()
+    if(is.null(res)) { 
+      cat("No model trained yet.")
+      return() 
+    }
+    
+    split <- train_test_split()
+    if(is.null(split)) { 
+      cat("No train/test split available.")
+      return() 
+    }
+    
+    dataset_choice <- input$residual_dataset %||% "both"
+    iqr_mult <- input$residual_boxplot_iqr %||% 1.5
+    
+    cat("Residual Boxplot Statistics\n")
+    cat("===========================\n\n")
+    cat("IQR Multiplier:", iqr_mult, "\n\n")
+    
+    if(dataset_choice %in% c("train", "both")) {
+      train_residuals <- res$y_train - res$train_pred
+      Q1_train <- quantile(train_residuals, 0.25, na.rm = TRUE)
+      Q3_train <- quantile(train_residuals, 0.75, na.rm = TRUE)
+      IQR_train <- Q3_train - Q1_train
+      lower_train <- Q1_train - iqr_mult * IQR_train
+      upper_train <- Q3_train + iqr_mult * IQR_train
+      outliers_train <- sum(train_residuals < lower_train | train_residuals > upper_train)
+      
+      cat("TRAIN SET:\n")
+      cat("  Observations:", length(train_residuals), "\n")
+      cat("  Median:", round(median(train_residuals), 4), "\n")
+      cat("  Q1:", round(Q1_train, 4), "\n")
+      cat("  Q3:", round(Q3_train, 4), "\n")
+      cat("  IQR:", round(IQR_train, 4), "\n")
+      cat("  Lower whisker:", round(lower_train, 4), "\n")
+      cat("  Upper whisker:", round(upper_train, 4), "\n")
+      cat("  Outliers:", outliers_train, "(", round(100 * outliers_train / length(train_residuals), 2), "%)\n\n")
+    }
+    
+    if(dataset_choice %in% c("test", "both") && !is.null(res$test_pred) && length(res$test_pred) > 0) {
+      test_residuals <- res$y_test - res$test_pred
+      Q1_test <- quantile(test_residuals, 0.25, na.rm = TRUE)
+      Q3_test <- quantile(test_residuals, 0.75, na.rm = TRUE)
+      IQR_test <- Q3_test - Q1_test
+      lower_test <- Q1_test - iqr_mult * IQR_test
+      upper_test <- Q3_test + iqr_mult * IQR_test
+      outliers_test <- sum(test_residuals < lower_test | test_residuals > upper_test)
+      
+      cat("TEST SET:\n")
+      cat("  Observations:", length(test_residuals), "\n")
+      cat("  Median:", round(median(test_residuals), 4), "\n")
+      cat("  Q1:", round(Q1_test, 4), "\n")
+      cat("  Q3:", round(Q3_test, 4), "\n")
+      cat("  IQR:", round(IQR_test, 4), "\n")
+      cat("  Lower whisker:", round(lower_test, 4), "\n")
+      cat("  Upper whisker:", round(upper_test, 4), "\n")
+      cat("  Outliers:", outliers_test, "(", round(100 * outliers_test / length(test_residuals), 2), "%)\n\n")
+    }
+  })
+  
+  output$residual_boxplot_outliers <- renderDT({
+    res <- model_results()
+    if(is.null(res)) {
+      return(datatable(data.frame(Message = "No model trained yet. Train a model first.")))
+    }
+    
+    split <- train_test_split()
+    if(is.null(split)) {
+      return(datatable(data.frame(Message = "No train/test split available.")))
+    }
+    
+    dataset_choice <- input$residual_dataset %||% "both"
+    iqr_mult <- input$residual_boxplot_iqr %||% 1.5
+    
+    outlier_data <- data.frame()
+    
+    if(dataset_choice %in% c("train", "both")) {
+      train_residuals <- res$y_train - res$train_pred
+      Q1_train <- quantile(train_residuals, 0.25, na.rm = TRUE)
+      Q3_train <- quantile(train_residuals, 0.75, na.rm = TRUE)
+      IQR_train <- Q3_train - Q1_train
+      lower_train <- Q1_train - iqr_mult * IQR_train
+      upper_train <- Q3_train + iqr_mult * IQR_train
+      train_outlier_idx <- which(train_residuals < lower_train | train_residuals > upper_train)
+      
+      if(length(train_outlier_idx) > 0) {
+        train_codes <- tryCatch({
+          complete_idx <- complete.cases(split$train[, res$predictors, drop = FALSE])
+          as.character(split$train$CODE[complete_idx])
+        }, error = function(e) rep("Unknown", length(train_residuals)))
+        
+        train_outlier_df <- data.frame(
+          CODE = train_codes[train_outlier_idx],
+          Dataset = "Train",
+          Residual = round(train_residuals[train_outlier_idx], 4),
+          Predicted = round(res$train_pred[train_outlier_idx], 4),
+          Actual = round(res$y_train[train_outlier_idx], 4)
+        )
+        outlier_data <- rbind(outlier_data, train_outlier_df)
+      }
+    }
+    
+    if(dataset_choice %in% c("test", "both") && !is.null(res$test_pred) && length(res$test_pred) > 0) {
+      test_residuals <- res$y_test - res$test_pred
+      Q1_test <- quantile(test_residuals, 0.25, na.rm = TRUE)
+      Q3_test <- quantile(test_residuals, 0.75, na.rm = TRUE)
+      IQR_test <- Q3_test - Q1_test
+      lower_test <- Q1_test - iqr_mult * IQR_test
+      upper_test <- Q3_test + iqr_mult * IQR_test
+      test_outlier_idx <- which(test_residuals < lower_test | test_residuals > upper_test)
+      
+      if(length(test_outlier_idx) > 0) {
+        test_codes <- tryCatch({
+          complete_idx <- complete.cases(split$test[, res$predictors, drop = FALSE])
+          as.character(split$test$CODE[complete_idx])
+        }, error = function(e) rep("Unknown", length(test_residuals)))
+        
+        test_outlier_df <- data.frame(
+          CODE = test_codes[test_outlier_idx],
+          Dataset = "Test",
+          Residual = round(test_residuals[test_outlier_idx], 4),
+          Predicted = round(res$test_pred[test_outlier_idx], 4),
+          Actual = round(res$y_test[test_outlier_idx], 4)
+        )
+        outlier_data <- rbind(outlier_data, test_outlier_df)
+      }
+    }
+    
+    if(nrow(outlier_data) == 0) {
+      return(datatable(data.frame(Message = paste("No outliers detected with IQR multiplier =", iqr_mult))))
+    }
+    
+    outlier_data <- outlier_data[order(abs(outlier_data$Residual), decreasing = TRUE), ]
+    
+    datatable(outlier_data, options = list(scrollX = TRUE, dom = 'frtip'), rownames = FALSE,
+              caption = paste("Total outliers:", nrow(outlier_data)))
   })
   
   output$cv_plot <- renderPlotly({
     res <- model_results()
     if(is.null(res) || is.null(res$cv_model)) {
-      return(plot_ly() %>% add_annotations(text = "No CV model available. Train a model first.", x = 0.5, y = 0.5))
+      return(plot_ly() %>% add_annotations(text = "No CV model available"))
     }
     
     cv_df <- data.frame(log_lambda = log(res$cv_model$lambda), cvm = res$cv_model$cvm,
                         cvup = res$cv_model$cvup, cvlo = res$cv_model$cvlo)
     
     p <- ggplot(cv_df, aes(x = log_lambda, y = cvm)) +
-      geom_ribbon(aes(ymin = cvlo, ymax = cvup), alpha = 0.3, fill = "#ADD8E6") +
-      geom_line(color = "#ADD8E6", size = 1) + geom_point(size = 1.5) +
-      geom_vline(xintercept = log(res$lambda_min), linetype = "dashed", color = "red", size = 1) +
-      geom_vline(xintercept = log(res$lambda_1se), linetype = "dotted", color = "blue", size = 1) +
+      geom_ribbon(aes(ymin = cvlo, ymax = cvup), alpha = 0.3, fill = "#13D4D4") +
+      geom_line(color = "#13D4D4", size = 1) + geom_point(size = 1.5) +
+      geom_vline(xintercept = log(res$lambda_min), linetype = "dashed", color = "#e74c3c") +
+      geom_vline(xintercept = log(res$lambda_1se), linetype = "dotted", color = "#13D4D4") +
       labs(title = "Cross-Validation Error", x = "log(Lambda)", y = "CV Error (MSE)") +
-      theme_minimal() + theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+      theme_minimal()
     
-    ggplotly(p) %>% layout(hoverlabel = list(bgcolor = "white", font = list(size = 10)))
+    ggplotly(p)
   })
   
+  
+  # Cross-Validation Summary
   output$cv_summary <- renderPrint({
     res <- model_results()
-    if(is.null(res) || is.null(res$cv_model)) { cat("No CV model available. Train a model first."); return() }
-    cat("Cross-Validation Summary\n========================\n\n")
+    if(is.null(res) || is.null(res$cv_model)) { 
+      cat("No CV model available. Train a model first.") 
+      return() 
+    }
+    
+    cat("Cross-Validation Summary\n")
+    cat("========================\n\n")
     cat("Number of folds:", input$cv_folds, "\n")
     cat("Lambda.min (minimum CV error):", round(res$lambda_min, 6), "\n")
     cat("Lambda.1se (1-standard error rule):", round(res$lambda_1se, 6), "\n")
@@ -5926,5 +6029,281 @@ server <- function(input, output, session) {
     cat("CV Error at lambda.min:", round(min(res$cv_model$cvm), 6), "\n")
     cat("CV Error at lambda.1se:", round(res$cv_model$cvm[which(res$cv_model$lambda == res$lambda_1se)], 6), "\n")
   })
+  
+  # Tuning CV Summary
+  output$tune_cv_summary <- renderPrint({
+    res <- tuning_results()
+    if(is.null(res)) {
+      cat("No tuning results available.\nClick 'Run Hyperparameter Tuning' to start.")
+      return()
+    }
+    
+    cat("HYPERPARAMETER TUNING SUMMARY\n")
+    cat("=============================\n\n")
+    cat("Data Information:\n")
+    cat("  Complete observations:", res$n_complete, "\n")
+    cat("  Predictor variables:", res$n_predictors, "\n\n")
+    cat("Tuning Grid:\n")
+    cat("  Alpha values:", length(res$alpha_values), 
+        "(from", min(res$alpha_values), "to", max(res$alpha_values), ")\n")
+    cat("  Lambda values:", length(res$lambda_values), 
+        "(from", round(min(res$lambda_values), 6), 
+        "to", round(max(res$lambda_values), 6), ")\n")
+    cat("  Total combinations tested:", nrow(res$grid), "\n\n")
+    cat("Cross-Validation:\n")
+    cat("  Number of folds:", input$tune_cv_folds, "\n")
+    cat("  Random seed:", input$tune_cv_seed, "\n")
+    cat("  Optimization metric:", res$metric_name, "\n\n")
+    cat("BEST PARAMETERS:\n")
+    cat("  Alpha:", round(res$best_alpha, 4), "\n")
+    cat("  Lambda:", round(res$best_lambda, 6), "\n")
+    cat("  Best", res$metric_name, ":", round(res$best_metric, 4), "\n")
+  })
+  
+  # Top Results Table
+  output$tune_top_results <- renderDT({
+    res <- tuning_results()
+    if(is.null(res)) {
+      return(datatable(data.frame(Message = "Run tuning first")))
+    }
+    
+    top_n <- min(20, nrow(res$grid))
+    
+    if(res$metric_name %in% c("RMSE", "MAE")) {
+      top_results <- res$grid[order(res$grid$metric_value), ][1:top_n, ]
+    } else {
+      top_results <- res$grid[order(-res$grid$metric_value), ][1:top_n, ]
+    }
+    
+    colnames(top_results) <- c("Alpha", "Lambda", res$metric_name)
+    top_results$Lambda <- round(top_results$Lambda, 6)
+    top_results[, 3] <- round(top_results[, 3], 4)
+    
+    datatable(top_results, 
+              options = list(pageLength = 10, scrollX = TRUE),
+              rownames = FALSE,
+              caption = paste("Top", top_n, "parameter combinations by", res$metric_name))
+  })
+  
+  
+  
+  
+  
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 14: HYPERPARAMETER TUNING
+  # ========================================================================
+  # ========================================================================
+  
+  tuning_results <- reactiveVal(NULL)
+  
+  output$tuning_complete <- reactive({ !is.null(tuning_results()) })
+  outputOptions(output, "tuning_complete", suspendWhenHidden = FALSE)
+  
+  observeEvent(input$run_tuning, {
+    if(input$model_data_source == "saved" && !is.null(selected_model_dataset()) && 
+       selected_model_dataset() %in% names(saved_datasets())) {
+      data <- saved_datasets()[[selected_model_dataset()]]$data
+    } else {
+      data <- standardize_missing(df)
+    }
+    
+    if("DEATH_RATE" %in% names(data) && is.character(data$DEATH_RATE)) {
+      data$DEATH_RATE[data$DEATH_RATE %in% c("-99", "--", "NA")] <- NA
+      data$DEATH_RATE <- suppressWarnings(as.numeric(data$DEATH_RATE))
+    }
+    
+    data <- data[!is.na(data$DEATH_RATE), ]
+    
+    predictor_vars <- setdiff(names(data), c("DEATH_RATE", "CODE", "OBS_TYPE"))
+    is_numeric <- sapply(data[, predictor_vars, drop = FALSE], is.numeric)
+    predictor_vars <- predictor_vars[is_numeric]
+    
+    if(length(predictor_vars) == 0) {
+      showNotification("No valid numeric predictors found for tuning.", type = "error")
+      return()
+    }
+    
+    X <- as.matrix(data[, predictor_vars, drop = FALSE])
+    y <- data$DEATH_RATE
+    
+    complete_idx <- complete.cases(X, y)
+    if(sum(complete_idx) < 10) {
+      showNotification(paste("Insufficient complete cases:", sum(complete_idx)), type = "error")
+      return()
+    }
+    
+    X <- X[complete_idx, , drop = FALSE]
+    y <- y[complete_idx]
+    
+    alpha_values <- seq(input$tune_alpha_min, input$tune_alpha_max, length.out = input$tune_alpha_steps)
+    lambda_values <- exp(seq(input$tune_lambda_min, input$tune_lambda_max, length.out = input$tune_lambda_steps))
+    
+    showNotification(paste("Starting tuning with", length(alpha_values), "alpha values and",
+                           length(lambda_values), "lambda values..."), type = "message", duration = 3)
+    
+    progress <- shiny::Progress$new()
+    progress$set(message = "Tuning hyperparameters", value = 0)
+    on.exit(progress$close())
+    
+    results_grid <- expand.grid(alpha = alpha_values, lambda = lambda_values, stringsAsFactors = FALSE)
+    total_combinations <- nrow(results_grid)
+    results_grid$metric_value <- NA
+    
+    set.seed(input$tune_cv_seed)
+    
+    for(i in 1:total_combinations) {
+      progress$set(value = i / total_combinations, detail = paste("Testing", i, "of", total_combinations))
+      
+      alpha_val <- results_grid$alpha[i]
+      lambda_val <- results_grid$lambda[i]
+      
+      cv_folds <- createFolds(y, k = min(input$tune_cv_folds, sum(complete_idx) - 1), list = TRUE, returnTrain = FALSE)
+      fold_metrics <- c()
+      
+      for(fold in seq_along(cv_folds)) {
+        test_idx <- cv_folds[[fold]]
+        train_idx <- setdiff(1:length(y), test_idx)
+        
+        model <- tryCatch({
+          glmnet(X[train_idx, , drop = FALSE], y[train_idx], alpha = alpha_val, lambda = lambda_val)
+        }, error = function(e) NULL)
+        
+        if(!is.null(model)) {
+          pred <- predict(model, newx = X[test_idx, , drop = FALSE])
+          
+          if(input$tune_metric == "RMSE") {
+            metric <- sqrt(mean((y[test_idx] - pred)^2))
+          } else if(input$tune_metric == "MAE") {
+            metric <- mean(abs(y[test_idx] - pred))
+          } else {
+            ss_res <- sum((y[test_idx] - pred)^2)
+            ss_tot <- sum((y[test_idx] - mean(y[test_idx]))^2)
+            metric <- 1 - ss_res / ss_tot
+          }
+          fold_metrics <- c(fold_metrics, metric)
+        }
+      }
+      
+      if(length(fold_metrics) > 0) {
+        results_grid$metric_value[i] <- mean(fold_metrics, na.rm = TRUE)
+      }
+    }
+    
+    if(input$tune_metric %in% c("RMSE", "MAE")) {
+      best_idx <- which.min(results_grid$metric_value)
+    } else {
+      best_idx <- which.max(results_grid$metric_value)
+    }
+    
+    tuning_results(list(
+      grid = results_grid,
+      best_alpha = results_grid$alpha[best_idx],
+      best_lambda = results_grid$lambda[best_idx],
+      best_metric = results_grid$metric_value[best_idx],
+      metric_name = input$tune_metric,
+      alpha_values = alpha_values,
+      lambda_values = lambda_values,
+      n_complete = sum(complete_idx),
+      n_predictors = length(predictor_vars)
+    ))
+    
+    showNotification(paste("Tuning complete! Best", input$tune_metric, "achieved with alpha =",
+                           round(results_grid$alpha[best_idx], 3), "and lambda =", round(results_grid$lambda[best_idx], 6)),
+                     type = "message", duration = 5)
+  })
+  
+  output$best_alpha_display <- renderText({ if(is.null(tuning_results())) "—" else round(tuning_results()$best_alpha, 4) })
+  output$best_lambda_display <- renderText({ if(is.null(tuning_results())) "—" else round(tuning_results()$best_lambda, 6) })
+  output$best_metric_display <- renderText({ if(is.null(tuning_results())) "—" else round(tuning_results()$best_metric, 4) })
+  
+  output$tune_alpha_plot <- renderPlotly({
+    res <- tuning_results()
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "Run tuning first"))
+    
+    alpha_summary <- res$grid %>% group_by(alpha) %>%
+      summarise(best_metric = if(res$metric_name %in% c("RMSE", "MAE")) min(metric_value) else max(metric_value))
+    
+    p <- ggplot(alpha_summary, aes(x = alpha, y = best_metric)) +
+      geom_line(color = "#13D4D4", size = 1.5) + geom_point(size = 3, color = "#13D4D4") +
+      geom_vline(xintercept = res$best_alpha, linetype = "dashed", color = "#e74c3c") +
+      labs(title = paste("Best", res$metric_name, "vs Alpha"), x = "Alpha", y = res$metric_name) +
+      theme_minimal()
+    
+    ggplotly(p)
+  })
+  
+  output$tune_lambda_plot <- renderPlotly({
+    res <- tuning_results()
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "Run tuning first"))
+    
+    lambda_subset <- res$grid[abs(res$grid$alpha - res$best_alpha) < 0.001, ]
+    if(nrow(lambda_subset) == 0) return(plot_ly() %>% add_annotations(text = "No data"))
+    
+    p <- ggplot(lambda_subset, aes(x = log(lambda), y = metric_value)) +
+      geom_line(color = "#13D4D4", size = 1.5) + geom_point(size = 2, color = "#13D4D4") +
+      geom_vline(xintercept = log(res$best_lambda), linetype = "dashed", color = "#e74c3c") +
+      labs(title = paste("Best", res$metric_name, "vs Lambda"), x = "log(Lambda)", y = res$metric_name) +
+      theme_minimal()
+    
+    ggplotly(p)
+  })
+  
+  output$tune_heatmap <- renderPlotly({
+    res <- tuning_results()
+    if(is.null(res)) return(plot_ly() %>% add_annotations(text = "Run tuning first"))
+    
+    heatmap_data <- matrix(NA, nrow = length(res$alpha_values), ncol = length(res$lambda_values))
+    rownames(heatmap_data) <- round(res$alpha_values, 3)
+    colnames(heatmap_data) <- round(log(res$lambda_values), 3)
+    
+    for(i in 1:nrow(res$grid)) {
+      alpha_idx <- which.min(abs(res$alpha_values - res$grid$alpha[i]))
+      lambda_idx <- which.min(abs(res$lambda_values - res$grid$lambda[i]))
+      heatmap_data[alpha_idx, lambda_idx] <- res$grid$metric_value[i]
+    }
+    
+    if(res$metric_name %in% c("RMSE", "MAE")) {
+      colorscale <- list(list(0, "#e74c3c"), list(0.5, "#f39c12"), list(1, "#13D4D4"))
+    } else {
+      colorscale <- list(list(0, "#e74c3c"), list(0.5, "#f39c12"), list(1, "#13D4D4"))
+    }
+    
+    plot_ly(z = heatmap_data, x = as.numeric(colnames(heatmap_data)), y = as.numeric(rownames(heatmap_data)),
+            type = "heatmap", colorscale = colorscale,
+            hovertemplate = "<b>Alpha: %{y:.3f}</b><br><b>log(Lambda): %{x:.3f}</b><br><b>Value: %{z:.4f}</b><extra></extra>") %>%
+      layout(title = "Hyperparameter Tuning Heatmap", xaxis = list(title = "log(Lambda)"), yaxis = list(title = "Alpha"))
+  })
+  
+  observeEvent(input$use_tuned_params, {
+    res <- tuning_results()
+    if(is.null(res)) {
+      showNotification("No tuning results available. Run tuning first.", type = "warning")
+      return()
+    }
+    updateSliderInput(session, "glmnet_alpha", value = res$best_alpha)
+    updateNumericInput(session, "glmnet_lambda", value = res$best_lambda)
+    showNotification(paste("Updated parameters: Alpha =", round(res$best_alpha, 4), ", Lambda =", round(res$best_lambda, 6)), type = "message")
+  })
+  
+  
+  
+  # ========================================================================
+  # ========================================================================
+  # SECTION 15: SYNC HTML5 SLIDERS WITH SHINY INPUTS
+  # ========================================================================
+  # ========================================================================
+  
+  if(!exists("runjs")) runjs <- shinyjs::runjs
+  
+  observeEvent(input$glmnet_alpha_slider, { updateNumericInput(session, "glmnet_alpha", value = input$glmnet_alpha_slider) })
+  observeEvent(input$residual_iqr_slider, { updateNumericInput(session, "residual_iqr", value = input$residual_iqr_slider) })
+  observeEvent(input$residual_boxplot_iqr_slider, { updateNumericInput(session, "residual_boxplot_iqr", value = input$residual_boxplot_iqr_slider) })
+  
+  observeEvent(input$glmnet_alpha, { runjs(paste0("document.getElementById('glmnet_alpha_slider').value = ", input$glmnet_alpha)) })
+  observeEvent(input$residual_iqr, { runjs(paste0("document.getElementById('residual_iqr_slider').value = ", input$residual_iqr)) })
+  observeEvent(input$residual_boxplot_iqr, { runjs(paste0("document.getElementById('residual_boxplot_iqr_slider').value = ", input$residual_boxplot_iqr)) })
   
 }  # Close server function

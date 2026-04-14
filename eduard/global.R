@@ -4,37 +4,29 @@
 # LIBRARY LOADING
 # ============================================================================
 
-library(shiny)
-library(shinythemes)
-library(shinyWidgets)
-library(shinyjs)
-library(DT)
-library(dplyr)
-library(plotly)
-library(ggplot2)
-library(GGally)
-library(rpart)
-library(rpart.plot)
-library(corrplot)
-library(vcd)
-library(recipes)
-library(caret)
-library(glmnet)
-library(tidyr)
-library(patchwork)
-library(shinyBS)
-library(naniar)
-library(bslib)
-library(UpSetR)
+# List of required packages
+required_packages <- c(
+  "shiny", "shinythemes", "shinyjs", "shinycssloaders",
+  "dplyr", "ggplot2", "plotly", "DT", "tidyr",
+  "corrplot", "VIM", "mice", "missForest",
+  "dbscan", "isotree", "e1071", "randomForest",
+  "glmnet", "rpart", "rpart.plot",
+  "caret", "summarytools", "tabplot", "ComplexUpset",
+  "rlang", "shinyWidgets"
+)
 
-#install.packages(c("dbscan", "e1071", "randomForest", "isotree", "ggrepel"))
+# Check and install missing packages
+for(pkg in required_packages) {
+  if(!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    cat("Installing missing package:", pkg, "\n")
+    install.packages(pkg, repos = "https://cloud.r-project.org/")
+    library(pkg, character.only = TRUE)
+  } else {
+    cat("✓", pkg, "\n")
+  }
+}
 
-library(dbscan)
-library(e1071)
-library(randomForest)
-library(isotree)
-library(ggrepel)
-library(jsonlite)  
+cat("\nAll packages ready! Launching app...\n")  
 
 
 # ============================================================================
@@ -94,4 +86,3 @@ get_missing_counts <- function(data, var) {
     Total = length(vals)
   )
 }
-
