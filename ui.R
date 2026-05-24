@@ -12,7 +12,71 @@ shinyUI(
     
 
     tabPanel('Introduction',
+             HTML("
+<h2><b>Welcome to Jesse's App!</b></h2>
 
+<p>There are two main sections in this app:</p>
+
+<div style='border:1px solid #ddd; padding:15px; margin-bottom:15px; border-radius:8px;'>
+  <h3>Exploratory Data Analysis</h3>
+  <p>
+  This section contains visuals used in Assignment 1. Each tab uses a separate reactive dataset, and visuals do not overlap between tabs. 
+  The underlying data has not been modified, so some illogical placeholder values such as <code>-99</code> and <code>'--'</code> are still present.
+  </p>
+</div>
+
+<div style='border:1px solid #ddd; padding:15px; margin-bottom:15px; border-radius:8px;'>
+  <h3>Processing & Modelling</h3>
+  <p>This section contains all visuals and tools related to Assignment 2. It has three key components:</p>
+
+  <div style='border:1px solid #eee; padding:10px; margin-bottom:10px; border-radius:6px;'>
+    <h4>EDA</h4>
+    <p>
+    This subsection was used for exploratory analysis after handling placeholder missing values (<code>-99</code> and <code>'--'</code>). 
+    It includes visuals for analysing missingness and outliers, as well as tools for testing different data processing techniques.
+    <p>
+    All visuals and tables visible in this subsection share the same underlying reactive dataset. 
+    The left hand column contains the tools to address missingnesss, outliers, and anomalies for you to play with as you see fit.
+    </p>
+  </div>
+
+  <div style='border:1px solid #eee; padding:10px; margin-bottom:10px; border-radius:6px;'>
+    <h4>Data Processing</h4>
+    <p>
+    This subsection allows you to build and save data processing pipelines using the <code>tidymodels</code> recipe framework. 
+    You can add any processing steps to construct full pipelines and save multiple versions.
+    </p>
+    <p>
+    Two pipelines are already included. These were the primary pipelines used in the assignment and were hardcoded in <code>global.R</code> 
+    to avoid rebuilding them each time the app is launched. Despite being hardcoded, they are fully integrated into the pipeline builder 
+    and can be recreated step by step if desired.
+    </p>
+    <p>
+    Note: Encoding of categorical variables using <code>step_dummy()</code> is handled automatically within the pipeline builder.
+    </p>
+  </div>
+
+  <div style='border:1px solid #eee; padding:10px; border-radius:6px;'>
+    <h4>GLMNet Model</h4>
+    <p>
+    This subsection allows you to evaluate a GLMNet model trained on pre-processed data. You can switch between different preprocessing 
+    pipelines and view evaluation metrics and visualisations.
+    </p>
+    <p>
+    Model tuning is simplified: <code>alpha</code> and <code>lambda</code> are automatically grid searched, with the best values selected.
+    </p>
+    <ul>
+      <li>Lambda tuning length</li>
+      <li>Number of cross-validation folds</li>
+      <li>Number of cross-validation repeats</li>
+    </ul>
+    <p>
+    Additional options include log-transforming the outcome variable (<code>DEATH_RATE</code>) and applying case weighting to handle outliers if needed.
+    </p>
+  </div>
+
+</div>
+")
              ),
     
     navbarMenu("Exploratory Data Analysis",
@@ -332,9 +396,8 @@ shinyUI(
              )
     ),
     
-    navbarMenu("Data Processing",
-               tabPanel("Introduction"), #Fill this out with info explaining processing module
-               tabPanel("EDA Processing",
+    navbarMenu("Processing & Modelling",
+               tabPanel("EDA",
                         layout_sidebar(
                           sidebar = sidebar(
                             title = "Data Controls",
@@ -344,7 +407,7 @@ shinyUI(
                                         choices = c("Base Data", "Train Split", "Test Split"),
                                         selected = "Base Data"),
                             
-                            # ── Missing Values Controls ─────────────────────────
+                            # ============Missing Values Controls =========================================
                             h6("Missing Values", style = "font-weight: bold;"),
                             
                             actionButton("reset_input_missing_processing", "Reset Missing Inputs",
@@ -366,7 +429,7 @@ shinyUI(
                             
                             hr(),
                             
-                            # ── Outlier Controls ────────────────────────────────
+                            # ===Outlier Controls =========================================
                             h6("Outlier Processing", style = "font-weight: bold;"),
                             
                             actionButton("reset_input_outlier_processing", "Reset Outlier Inputs",
@@ -651,12 +714,17 @@ shinyUI(
                                 ),
                                 
                                 tabPanel("Boxplot",
-                                         plotlyOutput("boxplot_outlier"),
+                                         plotOutput("boxplot_outlier"),
                                          accordion(open = FALSE,
                                                    accordion_panel("Chart Controls",
                                                                    chart_console(
                                                                      fluidRow(
-                                                                       column(4, pickerInput(
+                                                                       column(1, checkboxInput("iqr_outlier_label", "Label Outliers",
+                                                                                             value = FALSE)),
+                                                                       
+                                                                       column(3, sliderInput("iqr_outlier", "IQR Multiplier",
+                                                                                             min = 0.1, max = 3, value = 1.5)),
+                                                                       column(3, pickerInput(
                                                                          inputId = "selected_vars_boxplot_outlier",
                                                                          label   = "Select Variables",
                                                                          choices = names(data), selected = NULL, multiple = TRUE,
@@ -671,14 +739,9 @@ shinyUI(
                                                                            selected = NULL, multiple = TRUE,
                                                                            options = list(`actions-box` = TRUE, `live-search` = TRUE)
                                                                          )
-                                                                       )
-                                                                     ),
-                                                                     fluidRow(
-                                                                       column(4, sliderInput("iqr_outlier", "IQR Multiplier",
-                                                                                             min = 0.1, max = 3, value = 1.5))
-                                                                     ),
-                                                                     fluidRow(
-                                                                       column(4, div(
+                                                                       ),
+                                                                     
+                                                                       column(3, div(
                                                                          style = "display:flex;justify-content:flex-end;align-items:center;height:100%;",
                                                                          actionButton("reset_plot_input_boxplot_outlier", "Reset")
                                                                        ))
@@ -1144,7 +1207,7 @@ shinyUI(
                                        DTOutput("glm_data")
                                      ),
                                      accordion(open = FALSE,
-                                               accordion_panel("Model Details",
+                                               accordion_panel("Dataset Options",
                                                                chart_console(
                                                                  checkboxInput("glm_data_unstandardize",
                                                                                "Unstandardize Data",
@@ -1196,7 +1259,7 @@ shinyUI(
                                      "CV Folds",
                                      min   = 3,
                                      max   = 10,
-                                     value = 5,
+                                     value = 10,
                                      step  = 1
                                    )
                             ),
@@ -1231,6 +1294,21 @@ shinyUI(
 
                                      gt_output("model_details")
                                    )
+                            ),
+                            column(2,
+                                   checkboxInput("log_transform_outcome", "Log transform DEATH_RATE", value = FALSE),
+                                   
+                                   checkboxInput("weight_extremes", "Weight high DEATH_RATE observations more heavily", value = FALSE),
+                                   
+                                   conditionalPanel(
+                                     condition = "input.weight_extremes == true",                                   
+                                     sliderInput("extreme_quantile",
+                                               "Upper-tail threshold for weighting",
+                                               min = 0.70, max = 0.99, value = 0.90, step = 0.01),
+                                   
+                                   sliderInput("extreme_weight",
+                                               "Weight applied to extreme observations",
+                                               min = 1, max = 10, value = 3, step = 0.5))
                             )
                           )
                           ))),#Hyperparameter Panel End bracket

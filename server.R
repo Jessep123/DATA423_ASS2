@@ -104,10 +104,16 @@ shinyServer(function(input, output, session) {
   reactive_dataset <- function(label) {
       
       reactive({
-        
+        if (label == "missing_processing"){
         if (input$selected_data_EDA == "Base Data"){df <- data}
         else if (input$selected_data_EDA == "Train Split"){df <- train_data}
         else if (input$selected_data_EDA == "Test Split"){df <- test_data}
+        }
+        #For reactive datasets in Exploratory Data Analysis section, use unadjusted dataset
+        else if (label != "missing_processing"){df <- data_og}
+        
+        #For reactive datasets in Exploratory Data Analysis section, use unadjusted dataset
+        # if (label != "missing_processing"){df <- data_og}
         
         
         # df <- train_data
@@ -218,28 +224,67 @@ shinyServer(function(input, output, session) {
       
       df <- df[, keep_names, drop = FALSE]
       
+      # Outlier processing changes
+      outlier_steps <- outlier_processing_settings()
       
+      for (outlier_step in outlier_steps) {
+        method <- outlier_step$method
+        cols <- intersect(outlier_step$cols, names(df))
+        criteria <- outlier_step$criteria
+        threshold <- outlier_step$threshold
+        
+        if (length(cols) == 0) next
+        
+        for (col in cols) {
+          vals <- df[[col]]
+          
+          if (!is.numeric(vals)) next
+          if (all(is.na(vals))) next
+          if (length(unique(stats::na.omit(vals))) <= 2) next
+          
+          if (criteria == "Standard Deviation (Z-Score)") {
+            s <- sd(vals, na.rm = TRUE)
+            if (is.na(s) || s == 0) next
+            
+            m <- mean(vals, na.rm = TRUE)
+            lower <- m - threshold * s
+            upper <- m + threshold * s
+            
+          } else if (criteria == "Inter-Quartile Range") {
+            iqr_val <- IQR(vals, na.rm = TRUE)
+            if (is.na(iqr_val) || iqr_val == 0) next
+            
+            q1 <- quantile(vals, 0.25, na.rm = TRUE, names = FALSE)
+            q3 <- quantile(vals, 0.75, na.rm = TRUE, names = FALSE)
+            lower <- q1 - threshold * iqr_val
+            upper <- q3 + threshold * iqr_val
+            
+          } else {
+            next
+          }
+          
+          if (method == "Winsorize") {
+            df[[col]] <- ifelse(
+              is.na(df[[col]]),
+              NA,
+              pmin(pmax(df[[col]], lower), upper)
+            )
+          } else if (method == "Replace with NA") {
+            df[[col]] <- ifelse(
+              !is.na(df[[col]]) & (df[[col]] < lower | df[[col]] > upper),
+              NA,
+              df[[col]]
+            )
+          }
+        }
+      }
       
-      #Calculating missing count for each row
-      df <- df %>%
-        #Sum total of columns with a missing value
-        mutate(missing_count = rowSums(is.na(.)))
-      
-      #Object for threshold of missing values per row
-      missing_row_threshold <- input$missing_threshold_processing 
-      
-      #filtering rows that don't meet the missing value threshold
-        df <- df  %>%
-          #Removing rows that have more missing variables than threshold
-          filter(
-            missing_count >= missing_row_threshold[1],
-            missing_count <= missing_row_threshold[2]
-          )     
+          
         
       
       
         #Applying any tab filters
-        df <- filter_data(df, "outlier_processing")
+        # df <- filter_data(df, "outlier_processing")
         
         #Hashed out selecting columns manually in outlier section for now because it being buggy
         # #Only returning selected columns from page inputs
@@ -303,63 +348,10 @@ shinyServer(function(input, output, session) {
             bake(new_data = df)
         }
         
-        # Outlier processing changes
-        outlier_steps <- outlier_processing_settings()
         
-        for (outlier_step in outlier_steps) {
-          method <- outlier_step$method
-          cols <- intersect(outlier_step$cols, names(df))
-          criteria <- outlier_step$criteria
-          threshold <- outlier_step$threshold
-          
-          if (length(cols) == 0) next
-          
-          for (col in cols) {
-            vals <- df[[col]]
-            
-            if (!is.numeric(vals)) next
-            if (all(is.na(vals))) next
-            if (length(unique(stats::na.omit(vals))) <= 2) next
-            
-            if (criteria == "Standard Deviation (Z-Score)") {
-              s <- sd(vals, na.rm = TRUE)
-              if (is.na(s) || s == 0) next
-              
-              m <- mean(vals, na.rm = TRUE)
-              lower <- m - threshold * s
-              upper <- m + threshold * s
-              
-            } else if (criteria == "Inter-Quartile Range") {
-              iqr_val <- IQR(vals, na.rm = TRUE)
-              if (is.na(iqr_val) || iqr_val == 0) next
-              
-              q1 <- quantile(vals, 0.25, na.rm = TRUE, names = FALSE)
-              q3 <- quantile(vals, 0.75, na.rm = TRUE, names = FALSE)
-              lower <- q1 - threshold * iqr_val
-              upper <- q3 + threshold * iqr_val
-              
-            } else {
-              next
-            }
-            
-            if (method == "Winsorize") {
-              df[[col]] <- ifelse(
-                is.na(df[[col]]),
-                NA,
-                pmin(pmax(df[[col]], lower), upper)
-              )
-            } else if (method == "Replace with NA") {
-              df[[col]] <- ifelse(
-                !is.na(df[[col]]) & (df[[col]] < lower | df[[col]] > upper),
-                NA,
-                df[[col]]
-              )
-            }
-          }
-        }
         
         col_transformations <- variable_transformation_settings()
-        
+        trans_recipe <- recipe(~ ., data = df)
         for (transformation in col_transformations){
           cols <- intersect(names(df),transformation[[2]])
           method <-  transformation[[1]]
@@ -391,9 +383,7 @@ shinyServer(function(input, output, session) {
         
         #Apply recipe steps if there are any
         
-        trans_recipe <- recipe(~ ., data = df)
         if (length(trans_recipe$steps) > 0) {
-          browser()
           df <- trans_recipe %>%
             prep(training = df) %>%
             bake(new_data = df)
@@ -410,6 +400,23 @@ shinyServer(function(input, output, session) {
             )
           )
         }
+        
+        #Calculating missing count for each row
+        df <- df %>%
+          #Sum total of columns with a missing value
+          mutate(missing_count = rowSums(is.na(.)))
+        
+        #Object for threshold of missing values per row
+        missing_row_threshold <- input$missing_threshold_processing 
+        
+        #filtering rows that don't meet the missing value threshold
+        df <- df  %>%
+          #Removing rows that have more missing variables than threshold
+          filter(
+            missing_count >= missing_row_threshold[1],
+            missing_count <= missing_row_threshold[2]
+          ) 
+        
         df
       
     })
@@ -623,8 +630,7 @@ shinyServer(function(input, output, session) {
     
     #Dynamic filters for assignment 2
     output$dynamic_filters_categorical_missing_processing <- renderUI(make_dynamic_filters_categorical("missing_processing"))
-    output$dynamic_filters_categorical_outlier_processing <- renderUI(make_dynamic_filters_categorical("outlier_processing"))
-    
+
     
     #Function to make dynamic numeric filters
     make_dynamic_filters_numeric <- function(label) {
@@ -663,8 +669,7 @@ shinyServer(function(input, output, session) {
 
     #For assignment 2/processing section
     output$dynamic_filters_numeric_missing_processing <- renderUI(make_dynamic_filters_numeric("missing_processing"))
-    output$dynamic_filters_numeric_outlier_processing <- renderUI(make_dynamic_filters_numeric("outlier_processing"))
-    
+
   
   
   # ================================================================================
@@ -673,7 +678,7 @@ shinyServer(function(input, output, session) {
   
     #Total summary table, not used in final product 
    output$summary_table <- renderUI({
-     data %>% 
+     data_og %>% 
        summarytools::dfSummary(col.widths = c(10,80,150,120,120,180,220)) %>%
        summarytools::view(, method = "render")
    })
@@ -681,11 +686,11 @@ shinyServer(function(input, output, session) {
     #Summary boxes for quick insights
     output$variable_summary <- renderUI({
       layout_columns(
-        value_box("Rows", nrow(data)),
-        value_box("Variables", ncol(data)),
-        value_box("Numeric Variables", sum(sapply(data, is.numeric))),
-        value_box("Categorical Variables", sum(sapply(data, is.factor))),
-        value_box("Date Variables", sum(sapply(data, is.Date))),
+        value_box("Rows", nrow(data_og)),
+        value_box("Variables", ncol(data_og)),
+        value_box("Numeric Variables", sum(sapply(data_og, is.numeric))),
+        value_box("Categorical Variables", sum(sapply(data_og, is.factor))),
+        value_box("Date Variables", sum(sapply(data_og, is.Date))),
         col_widths = c(2, 2, 2, 2, 2),
         gap = "10px"
         
@@ -694,7 +699,7 @@ shinyServer(function(input, output, session) {
     
     #Numeric variable summary
     output$numeric_summary <- renderUI({
-      data %>%
+      data_og %>%
         select(where(is.numeric)) %>% 
         summarytools::dfSummary(col.widths = c(10,80,200,120,120,10,10),
                                 graph.magnif = 0.5) %>%
@@ -704,7 +709,7 @@ shinyServer(function(input, output, session) {
     
     #Categorical variable summary
     output$categorical_summary <- renderUI({
-      data %>%
+      data_og %>%
         select(where(is.factor)) %>% 
         summarytools::dfSummary(col.widths = c(10,80,150,120,120,180,220),
                                 graph.magnif = 0.5) %>%
@@ -1091,9 +1096,9 @@ shinyServer(function(input, output, session) {
       
       row_count <- nrow(df)
       
-      if (input$selected_data_EDA == "Base"){og_data <- data}
-      else if (input$selected_data_EDA == "Train Split"){og_data <- train_data}
-      else if (input$selected_data_EDA == "Test Split"){og_data <- test_data}
+      if (input$selected_data_EDA == "Base"){data <- data}
+      else if (input$selected_data_EDA == "Train Split"){data <- train_data}
+      else if (input$selected_data_EDA == "Test Split"){data <- test_data}
         
       #Visualizing dataframe with new order and sort_type = FALSE
       #This way factor/ordered factors are side by side in the final plot
@@ -1104,7 +1109,7 @@ shinyServer(function(input, output, session) {
                             missing_threshold_title,
                             row_count,
                             " / ",
-                            nrow(og_data),
+                            nrow(data),
                             " Rows",
                             order_title)) +
         scale_fill + #datatype colours list found in global.r
@@ -1555,8 +1560,7 @@ shinyServer(function(input, output, session) {
           
           #If 4+ variables are selected
         }else if (!is.null(input$selected_vars_mosaic_z) && !is.null(input$selected_vars_mosaic_xyz)){
-          extra_vars <- 
-          
+
           formula <- as.formula(
             paste("~",
                   input$selected_vars_mosaic_x,
@@ -1704,6 +1708,10 @@ shinyServer(function(input, output, session) {
       
       
       
+
+      
+      
+      
       order_title <- NULL
       break_lines <- NULL
       
@@ -1729,7 +1737,7 @@ shinyServer(function(input, output, session) {
             prop = n / sum(n),
             cum_prop = cumsum(prop)
           ) 
-        
+
         # Groups smaller than proportion threshold
         small_groups <- group_info %>%
           filter(cum_prop < prop_threshold)
@@ -1797,6 +1805,7 @@ shinyServer(function(input, output, session) {
       #Calculating missing % for each variable
       missing_pct <- colMeans(is.na(df)) * 100
       
+
       #Ordering each group of columns by missing %
       factor_cols   <- factor_cols[order(missing_pct[factor_cols], decreasing = TRUE)]
       ordered_cols  <- ordered_cols[order(missing_pct[ordered_cols], decreasing = TRUE)]
@@ -1808,7 +1817,8 @@ shinyServer(function(input, output, session) {
       #Applying my new special order
       df <- df[, new_order, drop = FALSE]
       
-      
+      print(round(missing_pct["VAX_RATE"], 0))
+      print(names(df))
       #Setting colour/legend inputs depending on if distinct datatypes selected or not
       if (input$distinct_datatypes_missing_processing){
         dtype_colours <-  datatype_colours
@@ -1849,8 +1859,7 @@ shinyServer(function(input, output, session) {
         is_it_coloured <-  NULL
       }
       
-      
-      
+
       
       #Visualizing dataframe with new order and sort_type = FALSE
       #This way factor/ordered factors are side by side in the final plot
@@ -2316,182 +2325,178 @@ shinyServer(function(input, output, session) {
     })
     
     #Boxplot outlier plot
-    output$boxplot_outlier <-  renderPlotly({
-      df <-  processed_eda_reactive()
+    output$boxplot_outlier <- renderPlot({
       
-      #Removing missing count as it isnt needed
+      df <- processed_eda_reactive()
       df$missing_count <- NULL
       
       num_var <- input$selected_vars_boxplot_outlier
       num_var <- intersect(num_var, names(df))
       
-      if (is.null(num_var)){
-        num_var <- names(df[, sapply(df, is.numeric)])
+      if (is.null(num_var) || length(num_var) == 0) {
+        num_var <- names(df[, sapply(df, is.numeric), drop = FALSE])
       }
       
-
+      # ensure numeric only
+      num_var <- num_var[num_var %in% names(df)[sapply(df, is.numeric)]]
+      
       colour_var <- input$colour_by_boxplot_outlier
       
-
-      
       if (length(num_var) > 1) {
-        #Removing categorical variables
-        df <- df[, sapply(df, is.numeric), drop = FALSE]
-        colour_var <-  NULL
+        colour_var <- NULL
       }
       
-      df <-  df %>% select(all_of(c(num_var, colour_var)))
+      cols_to_keep <- c("CODE", num_var, colour_var)
+      cols_to_keep <- cols_to_keep[cols_to_keep %in% names(df)]
       
-      req(ncol(df) > 0)
+      df <- df %>% select(all_of(cols_to_keep))
       
-      #Different y-axis label depending on scale input
-      if (input$center_data_outlier == TRUE && input$scale_data_outlier == TRUE){
-        x_label = "Standardised Values (Z-Score)"
+      req(length(num_var) > 0)
+      
+      iqr_multiplier <- input$iqr_outlier
+      
+      # ---- Axis label ----
+      if (isTRUE(input$center_data_outlier) && isTRUE(input$scale_data_outlier)) {
+        x_label <- "Standardised Values (Z-Score)"
+      } else if (isTRUE(input$center_data_outlier) && !isTRUE(input$scale_data_outlier)) {
+        x_label <- "Centered Values"
+      } else if (!isTRUE(input$center_data_outlier) && isTRUE(input$scale_data_outlier)) {
+        x_label <- "Scaled Values"
+      } else {
+        x_label <- "Unadjusted Values"
       }
-      else if (input$center_data_outlier == TRUE && input$scale_data_outlier == FALSE){
-        x_label = "Centered Values"
+      
+      # ---- Title logic ----
+      total_numeric_vars <- 11
+      
+      if (length(num_var) == total_numeric_vars) {
+        plot_title <- "Boxplot of All Variables"
+      } else {
+        plot_title <- paste("Boxplot of", paste(num_var, collapse = " and "))
       }
-      else if (input$center_data_outlier == FALSE && input$scale_data_outlier == TRUE){
-        x_label = "Scaled Values"
+      
+      if (length(num_var) == 1 && !is.null(colour_var) && colour_var %in% names(df)) {
+        plot_title <- paste0(plot_title, " Split by ", colour_var)
       }
-      else{x_label = "Unadjusted Values"}
       
-      #Plot titles/labels
-      y_label = paste0("Variable (", ncol(df), " / ", ncol(data[, (sapply(data, is.numeric)), drop =FALSE]), " Numeric Variables Selected)")
-      
-      title = paste0("Boxplot \n", x_label, " | ", ncol(df), " / ", ncol(data), " Variables Selected | ", "IQR ", input$iqr_outlier)
-      
-      
-      
-      iqr_multiplier <-  input$iqr_outlier
-      
-      
-      
-      # Different plotting arguments required if colourby is selected
-      if (length(num_var) == 1 && !is.null(colour_var)) {
+      # ---- CASE 1: Single variable split by categorical variable ----
+      if (length(num_var) == 1 && !is.null(colour_var) && colour_var %in% names(df)) {
         
         df_long <- df %>%
           rename(
             Value = all_of(num_var),
             Group = all_of(colour_var)
-          )
-        
-        df_stats <- df_long %>%
-          group_by(Group) %>%
-          summarise(
-            q1 = quantile(Value, 0.25, na.rm = TRUE),
-            q3 = quantile(Value, 0.75, na.rm = TRUE),
-            median = median(Value, na.rm = TRUE),
-            iqr = IQR(Value, na.rm = TRUE),
-            lower_fence = q1 - iqr_multiplier * iqr,
-            upper_fence = q3 + iqr_multiplier * iqr,
-            .groups = "drop"
-          )%>%
-          #Adding 'NA' as string to be plotted
+          ) %>%
           mutate(
             Group = as.character(Group),
             Group = ifelse(is.na(Group), "NA", Group)
           )
         
-        df_stats <- df_stats %>%
-          left_join(
-            df_long %>%
-              left_join(df_stats, by = "Group") %>%
-              group_by(Group) %>%
-              summarise(
-                lower_whisker = min(Value[Value >= first(lower_fence)], na.rm = TRUE),
-                upper_whisker = max(Value[Value <= first(upper_fence)], na.rm = TRUE),
-                .groups = "drop"
-              ),
-            by = "Group"
-          )
+        df_stats <- df_long %>%
+          group_by(Group) %>%
+          mutate(
+            q1 = quantile(Value, 0.25, na.rm = TRUE),
+            q3 = quantile(Value, 0.75, na.rm = TRUE),
+            iqr = IQR(Value, na.rm = TRUE),
+            lower = q1 - iqr_multiplier * iqr,
+            upper = q3 + iqr_multiplier * iqr
+          ) %>%
+          ungroup()
         
-        outliers <- df_long %>%
-          left_join(df_stats, by = "Group") %>%
-          filter(Value < lower_fence | Value > upper_fence)
+        outliers <- df_stats %>%
+          filter(Value < lower | Value > upper)
         
-
-        plot_ly(
-          type = "box",
-          orientation = "h",
-          q1 = df_stats$q1,
-          median = df_stats$median,
-          q3 = df_stats$q3,
-          lowerfence = df_stats$lower_whisker,
-          upperfence = df_stats$upper_whisker,
-          y = df_stats$Group,
-          name = "Boxplot"
-        ) %>%
-          add_markers(
+        p <- ggplot(df_long, aes(x = Value, y = Group)) +
+          geom_boxplot(fill = "#4C78A8", alpha = 0.6, outlier.shape = NA) +
+          geom_point(
             data = outliers,
-            x = ~Value,
-            y = ~Group,
-            marker = list(color = "red", size = 6),
-            name = "Outliers",
-            inherit = FALSE
+            aes(x = Value, y = Group),
+            color = "red",
+            size = 2
           )
+        
+        if (isTRUE(input$iqr_outlier_label) && nrow(outliers) > 0) {
+          p <- p +
+            ggrepel::geom_text_repel(
+              data = outliers,
+              aes(x = Value, y = Group, label = CODE),
+              direction = "both",
+              hjust = 0,
+              size = 3,
+              box.padding = 0.25,
+              point.padding = 0.2,
+              segment.color = "grey50",
+              max.overlaps = Inf,
+              min.segment.length = 0,
+              seed = 123,
+              show.legend = FALSE
+            )
+        }
+        
+        y_label <- colour_var
         
       } else {
         
-        # Original multiple-variable behaviour
-        df_long <- tidyr::pivot_longer(
-          df,
-          cols = everything(),
-          names_to = "Variable",
-          values_to = "Value"
-        )
+        # ---- CASE 2: One or more numeric variables, no grouping ----
+        df_long <- df %>%
+          tidyr::pivot_longer(
+            cols = all_of(num_var),
+            names_to = "Variable",
+            values_to = "Value"
+          )
         
         df_stats <- df_long %>%
           group_by(Variable) %>%
-          summarise(
+          mutate(
             q1 = quantile(Value, 0.25, na.rm = TRUE),
             q3 = quantile(Value, 0.75, na.rm = TRUE),
-            median = median(Value, na.rm = TRUE),
             iqr = IQR(Value, na.rm = TRUE),
-            lower_fence = q1 - iqr_multiplier * iqr,
-            upper_fence = q3 + iqr_multiplier * iqr,
-            .groups = "drop"
-          )
+            lower = q1 - iqr_multiplier * iqr,
+            upper = q3 + iqr_multiplier * iqr
+          ) %>%
+          ungroup()
         
-        df_stats <- df_stats %>%
-          left_join(
-            df_long %>%
-              left_join(df_stats, by = "Variable") %>%
-              group_by(Variable) %>%
-              summarise(
-                lower_whisker = min(Value[Value >= first(lower_fence)], na.rm = TRUE),
-                upper_whisker = max(Value[Value <= first(upper_fence)], na.rm = TRUE),
-                .groups = "drop"
-              ),
-            by = "Variable"
-          )
+        outliers <- df_stats %>%
+          filter(Value < lower | Value > upper)
         
-        
-        outliers <- df_long %>%
-          left_join(df_stats, by = "Variable") %>%
-          filter(Value < lower_fence | Value > upper_fence)
-        
-        plot_ly(
-          type = "box",
-          orientation = "h",
-          q1 = df_stats$q1,
-          median = df_stats$median,
-          q3 = df_stats$q3,
-          lowerfence = df_stats$lower_whisker,
-          upperfence = df_stats$upper_whisker,
-          y = df_stats$Variable
-        ) %>%
-          add_markers(
+        p <- ggplot(df_long, aes(x = Value, y = Variable)) +
+          geom_boxplot(fill = "#4C78A8", alpha = 0.6, outlier.shape = NA) +
+          geom_point(
             data = outliers,
-            x = ~Value,
-            y = ~Variable,
-            marker = list(color = "red", size = 6),
-            name = "Outliers",
-            inherit = FALSE
-          ) }
+            aes(x = Value, y = Variable),
+            color = "red",
+            size = 2
+          )
+        
+        if (isTRUE(input$iqr_outlier_label) && nrow(outliers) > 0) {
+          p <- p +
+            ggrepel::geom_text_repel(
+              data = outliers,
+              aes(x = Value, y = Variable, label = CODE),
+              direction = "both",
+              hjust = 0,
+              size = 3,
+              box.padding = 0.25,
+              point.padding = 0.2,
+              segment.color = "grey50",
+              max.overlaps = Inf,
+              min.segment.length = 0,
+              seed = 123,
+              show.legend = FALSE
+            )
+        }
+        
+        y_label <- "Variable"
+      }
       
+      p +
+        labs(
+          title = plot_title,
+          x = x_label,
+          y = y_label
+        ) +
+        eda_plot_theme()
     })
-    
     #Reset boxplot value inputs
     observeEvent(input$reset_plot_input_boxplot_outlier, {
       reset("colour_by_boxplot_outlier")
@@ -2527,7 +2532,7 @@ shinyServer(function(input, output, session) {
       
       df$id <- seq_len(nrow(df))
       
-      
+
       if (mark_outlier_flag){
         
         selected_col <- df[[var]]
@@ -2543,6 +2548,8 @@ shinyServer(function(input, output, session) {
           lower_bound <- q1 - iqr_multiplier * iqr
           upper_bound <- q3 + iqr_multiplier * iqr
           
+          outlier_info <- paste0("Outlier Criteria = Interquartile Range | IQR Multiplier = ", iqr_multiplier)
+          
         } else if (outlier_method == "Standard Deviation"){
           #Calculating standard deviation of col
           mean_col <- mean(selected_col, na.rm = TRUE)
@@ -2552,6 +2559,9 @@ shinyServer(function(input, output, session) {
           
           lower_bound <- mean_col - sd_val * sd_col
           upper_bound <- mean_col + sd_val * sd_col
+          
+          outlier_info <- paste0("Outlier Criteria = Standard Deviations From Mean | Threshold = ", input$outlier_scatter_sd_num)
+          
           
         }
         #Applying upper/lower bounds to flag outliers
@@ -2564,16 +2574,12 @@ shinyServer(function(input, output, session) {
         df$label <- NA_character_
         df$label[df$outlier_flag == "outlier"] <- as.character(df$CODE[df$outlier_flag == "outlier"])
 
-      }
+        #Otherwise outlier_info is null
+      } else{outlier_info <- NULL}
       
 
       plot <- ggplot(df, aes(x = id,
-                             y = .data[[var]])) +
-        labs(
-          y = var,
-          x = "Complete Observations",
-          title = paste("Scatter Plot of", var)
-        ) + 
+                             y = .data[[var]])) + 
         eda_plot_theme()
       
       #If mark outliers is selected then colour by the calculated column and label
@@ -2592,9 +2598,16 @@ shinyServer(function(input, output, session) {
           theme(
             panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
           )
+        outlier_info <- paste0("Facet Wrap With ", input$univariate_facet, "\n", outlier_info)
       }
       
-      plot 
+      plot +
+        labs(
+          y = var,
+          x = "Complete Observations",
+          title = paste("Scatter Plot of", var),
+          subtitle = outlier_info
+        ) 
       
     })
     
@@ -3010,7 +3023,8 @@ shinyServer(function(input, output, session) {
         
         if (input[[row_remove_apply_to_test]]){ #If checkbox is TRUE
           test_skip <- FALSE #skip = FALSE in processing pipeline so row removal applied to test data
-        } else{test_skip <- TRUE}#skip = TRUE in processing pipeline so rows aren't removed in test and all imputed instead
+        }
+        else{test_skip <- TRUE}#skip = TRUE in processing pipeline so rows aren't removed in test and all imputed instead
         
       }
       else if (input[[input_method]] == "remove_na_cols"){
@@ -3059,7 +3073,7 @@ shinyServer(function(input, output, session) {
       }
       else if (input[[input_method]] == "interaction_term"){
         #Keep original variables flag included as additional info
-        additional_info <- input[[paste0("step_interact_keep_og_", id)]]
+        additional_info <- isolate(input[[paste0("step_interact_keep_og_", id)]])
         if (length(cols) != 2) {
           showNotification(
             "Please select exactly 2 numeric variables for an interaction term.",
@@ -3072,6 +3086,20 @@ shinyServer(function(input, output, session) {
         train_cols <- input[[paste0("step_", id, "obs_remove_train")]]
         test_cols <-input[[paste0("step_", id, "obs_remove_test")]]
         additional_info <- c(train_cols, test_cols)
+        
+      }
+      else if (input[[input_method]] == "shadow_var"){
+        operation <- isolate(input[[paste0("step_shadow_operation", id)]])
+        value <- isolate(input[[paste0("step_shadow_num_", id)]])
+        cols <- isolate(input[[paste0("step_col_shadow_", id)]])
+        additional_info <- list(
+          operation = operation,
+          value = value
+        )
+      }
+      else if (input[[input_method]] == "remove_var"){
+        cols <- isolate(input[[paste0("step_col_remove_", id)]])
+        additional_info <- 0
       }
       else {additional_info <- 0}
       
@@ -3111,7 +3139,7 @@ shinyServer(function(input, output, session) {
           style = "background-color: #f8f9fa;",
           div(
             style = "display: flex; justify-content: space-between; align-items: center;",
-            strong(paste("Step", step_id)),
+            strong(paste("Step", step_id))
             
           )
         ),
@@ -3124,6 +3152,7 @@ shinyServer(function(input, output, session) {
             "-- Select --"             = "",
             "Remove Rows with NAs"     = "remove_na_rows",
             "Remove Columns with NAs"  = "remove_na_cols",
+            "Remove Variable"  = "remove_var",
             "Impute — Median"          = "impute_median",
             "Impute — Mean"            = "impute_mean",
             "Impute — KNN"             = "impute_knn",
@@ -3140,13 +3169,51 @@ shinyServer(function(input, output, session) {
             "Remove Multivariate Outliers"     = "remove_outliers",
             "Replace Outliers with NA"     = "replace_outliers",
             "Winsorize Outliers"     = "winsorize",
-            "Add Interaction Term"     = "interaction_term"
+            "Add Interaction Term"     = "interaction_term",
+            "Create Shadow Variable" = "shadow_var"
             
             
           ),
           selected = ""
+        ),            
+        # Conditional panel for removing variable
+        conditionalPanel(
+          condition = paste0("input['step_method_", step_id, "'] == 'remove_var'"),
+          pickerInput(
+            inputId  = paste0("step_col_remove_", step_id),
+            label    = "Select VariableS",
+            choices  = all_cols[all_cols != "DEATH_RATE"],
+            selected = NULL,
+            multiple = TRUE,
+            options  = list(`actions-box` = TRUE, `live-search` = TRUE)
+          )
         ),
         
+        # Conditional panel for creating shadow variable
+        conditionalPanel(
+          condition = paste0("input['step_method_", step_id, "'] == 'shadow_var'"),
+          pickerInput(
+            inputId  = paste0("step_col_shadow_", step_id),
+            label    = "Select Variable",
+            choices  = numeric_cols[numeric_cols != "DEATH_RATE"],
+            selected = "POP_DENSITY",
+            multiple = FALSE,
+            options  = list(`actions-box` = TRUE, `live-search` = TRUE)
+          ),
+          pickerInput(
+            inputId  = paste0("step_shadow_operation", step_id),
+            label    = "Operation",
+            choices  = c(">", "<", "=", "is na"),
+            selected = ">",
+            multiple = FALSE,
+            options  = list(`actions-box` = TRUE, `live-search` = TRUE)
+          ),
+          numericInput(
+            inputId  = paste0("step_shadow_num_", step_id),
+            label = "Value - Doesn't Matter if Operation 'is na'",
+            value = 500
+          )
+        ),
         # Conditional panel for selecting columns depending on selected method
         conditionalPanel(
           condition = paste0("input['step_method_", step_id, "'] == 'interaction_term'"),
@@ -3154,7 +3221,7 @@ shinyServer(function(input, output, session) {
             inputId  = paste0("step_cols_", step_id),
             label    = "Select Two Interaction Variables",
             choices  = all_cols[all_cols != "DEATH_RATE"],
-            selected = NULL,
+            selected = c("VAX_RATE", "GDP"),
             multiple = TRUE,
             options  = list(`actions-box` = TRUE, `live-search` = TRUE)
           ),
@@ -3177,6 +3244,7 @@ shinyServer(function(input, output, session) {
             "input['step_method_", step_id, "'] == 'yeojohnson'    || ",
             "input['step_method_", step_id, "'] == 'winsorize'     ||",
             "input['step_method_", step_id, "'] == 'replace_outliers'"
+
             
           ),
           pickerInput(
@@ -3260,12 +3328,12 @@ shinyServer(function(input, output, session) {
           sliderInput(
             paste0("step_na_row_threshold_", step_id),
             "Remove rows with more than X missing values",
-            min = 0, max = ncol(df), value = 0, step = 1
+            min = 0, max = ncol(df), value = 3, step = 1
           ),
           checkboxInput(
             paste0("step_na_row_apply_test", step_id),
             "Apply Row Removal to Test Data",
-            value = TRUE
+            value = FALSE
           )
         ),
         # Just a note if lincomb is selected  
@@ -3389,7 +3457,7 @@ shinyServer(function(input, output, session) {
               value = 1.5
             )
           ),
-          p("All calculations are done column wise"),
+          p("All calculations are done column wise")
           
         ),
         
@@ -3493,6 +3561,17 @@ shinyServer(function(input, output, session) {
           else if (method == "remove_obs"){
             contextual_info <- paste0("| ", length(step$additional_info), " Obs")
           } 
+          else if (method == "shadow_var"){
+            op <- step$additional_info$operation
+            val <- step$additional_info$value
+            if (op != "is na"){
+            contextual_info <- paste0("| ", cols[1], " ", op, " ", val)
+            }
+            else {contextual_info <- paste0("| ", cols[1], " ", op)}
+          } 
+          else if (method == "remove_var"){
+            contextual_info <- paste0("| Remove: ", paste(cols, collapse = ", "))
+          } 
           else{contextual_info <- NULL}
           
           div(
@@ -3501,7 +3580,7 @@ shinyServer(function(input, output, session) {
             div(
               strong(paste("Step", i, ": ")),
               methods[[method]],
-              contextual_info,
+              contextual_info
             ),
             # actionButton(
             #   inputId = paste0("remove_step_", i),
@@ -3525,10 +3604,16 @@ shinyServer(function(input, output, session) {
     # Reactive object for saving pipelines
     #Already has default pipeline defined
     saved_pipelines <- reactiveVal(list(
-      "Default Pipeline" = list(
+      "Initial Pipeline" = list(
         recipe  = default_recipe,
         df      = juice(default_prepped),
         steps   = default_steps,
+        created = Sys.time()
+      ),
+      "Adjusted Pipeline" = list(
+        recipe  = adjusted_recipe,
+        df      = juice(adjusted_prepped),
+        steps   = adjusted_steps,
         created = Sys.time()
       )
     ))
@@ -3552,6 +3637,10 @@ shinyServer(function(input, output, session) {
       #For interaction term with cat vars later on
       interaction_encoded_cats <- c()
       
+      #In case cat vars are removed using step_rm()
+      removed_cats <- c()
+
+      created_cols <- character()
       #Adding each step into recipe
       for (i in seq_along(steps)) {
         step   <- steps[[i]]
@@ -3561,10 +3650,10 @@ shinyServer(function(input, output, session) {
         
         cols <- intersect(names(df), setdiff(step$cols, removed_cols))
         
-        print(paste("STEP", i))
-        print(method)
-        print(cols)
-        print(step$additional_info)
+        # print(paste("STEP", i))
+        # print(method)
+        # print(cols)
+        # print(step$additional_info)
         
         needs_cols <- method %in% c(
           "impute_median", "impute_mean", "impute_knn", "impute_bag",
@@ -3598,7 +3687,8 @@ shinyServer(function(input, output, session) {
             step_rm(.row_na_count)
           
 
-        } else if (method == "remove_na_cols") {
+        } 
+        else if (method == "remove_na_cols") {
           threshold <- step$additional_info
           active_cols  <- setdiff(names(df), c(imputed_cols, removed_cols))
           
@@ -3612,7 +3702,8 @@ shinyServer(function(input, output, session) {
           # Update removed column tracker
           removed_cols <- c(removed_cols, cols_to_remove)
           
-        } else if (method == "impute_manual") {
+        } 
+        else if (method == "impute_manual") {
           num_val <- as.numeric(step$additional_info)
           
           for (col in cols) {
@@ -3630,7 +3721,8 @@ shinyServer(function(input, output, session) {
 
           imputed_cols <- c(imputed_cols, cols)
           
-        } else if (method == "impute_manual_cat") {
+        } 
+        else if (method == "impute_manual_cat") {
           cat_val <- as.character(step$additional_info)
           
           for (col in cols) {
@@ -3643,40 +3735,50 @@ shinyServer(function(input, output, session) {
                 !!col_sym := as.factor(!!col_sym)
               )
           }
-        } else if (method == "impute_median") {
+        } 
+        else if (method == "impute_median") {
           pipeline_recipe <- pipeline_recipe %>% step_impute_median(all_of(!!cols))
           imputed_cols <- c(imputed_cols, cols)
           
-        } else if (method == "impute_mean") {
+        }
+        else if (method == "impute_mean") {
           pipeline_recipe <- pipeline_recipe %>% step_impute_mean(all_of(!!cols))
           imputed_cols <- c(imputed_cols, cols)
           
-        } else if (method == "impute_knn") {
+        } 
+        else if (method == "impute_knn") {
           k <- step$additional_info
           pipeline_recipe <- pipeline_recipe %>% step_impute_knn(all_of(!!cols), neighbors = k)
           imputed_cols <- c(imputed_cols, cols)
-        } else if (method == "impute_bag") {
+        } 
+        else if (method == "impute_bag") {
           
           tree <- step$additional_info
           pipeline_recipe <- pipeline_recipe %>% step_impute_bag(all_of(!!cols), trees = tree)
           imputed_cols <- c(imputed_cols, cols)
           
-        } else if (method == "boxcox") {
+        }
+        else if (method == "boxcox") {
           pipeline_recipe <- pipeline_recipe %>% step_BoxCox(all_of(!!cols))
           
-        } else if (method == "yeojohnson") {
+        } 
+        else if (method == "yeojohnson") {
           pipeline_recipe <- pipeline_recipe %>% step_YeoJohnson(all_of(!!cols))
           
-        } else if (method == "scale") {
+        }
+        else if (method == "scale") {
           pipeline_recipe <- pipeline_recipe %>% step_scale(all_numeric_predictors())
           
-        } else if (method == "center") {
+        } 
+        else if (method == "center") {
           pipeline_recipe <- pipeline_recipe %>% step_center(all_numeric_predictors())
           
-        } else if (method == "nzv") {
+        } 
+        else if (method == "nzv") {
           pipeline_recipe <- pipeline_recipe %>% step_nzv(all_predictors())
           
-        } else if (method == "lincomb") {
+        }
+        else if (method == "lincomb") {
           prepped_tmp <- prep(pipeline_recipe, training = df)
           current_data <- juice(prepped_tmp)
           
@@ -3748,7 +3850,6 @@ shinyServer(function(input, output, session) {
               )
           }
         }
-        
         else if (method == "remove_outliers"){
           criteria <- step$outlier_criteria
           details <- step$additional_info
@@ -3880,26 +3981,42 @@ shinyServer(function(input, output, session) {
           var1 <- cols[1]
           var2 <- cols[2]
           
+
           #Checking if selected cols are categorical or numeric
           var1_is_num <- var1 %in% names(df)[sapply(df, is.numeric)]
           var2_is_num <- var2 %in% names(df)[sapply(df, is.numeric)]
           var1_is_cat <- var1 %in% names(df)[sapply(df, is.factor)]
           var2_is_cat <- var2 %in% names(df)[sapply(df, is.factor)]
           
-          
+
          
           #Formula for interaction term 
           #If both numeric
           if (var1_is_num && var2_is_num) {
             
+            new_name <- paste(var1, var2, sep = "_x_")
+            
+            if (new_name %in% c(names(df), created_cols)) {
+              showNotification(
+                paste0("Interaction term '", new_name, "' already exists."),
+                type = "error"
+              )
+              next
+            }
+            
             interaction_formula <- as.formula(
               paste0("~ ", var1, ":", var2)
             )
             
-            pipeline_recipe <- pipeline_recipe %>%
-              step_interact(terms = interaction_formula)
             
-          }else if (var1_is_num && var2_is_cat) {
+            pipeline_recipe <- pipeline_recipe %>%
+              step_interact(terms = !!interaction_formula)
+            
+            created_cols <- c(created_cols, new_name)
+            
+
+          }
+          else if (var1_is_num && var2_is_cat) {
             
             pipeline_recipe <- pipeline_recipe %>%
               step_unknown(all_of(var2)) %>%
@@ -3912,7 +4029,8 @@ shinyServer(function(input, output, session) {
             #Making note that these have already been encoded
             interaction_encoded_cats <- unique(c(interaction_encoded_cats, var2))
             
-          }else if (var2_is_num && var1_is_cat) {
+          }
+          else if (var2_is_num && var1_is_cat) {
             
             pipeline_recipe <- pipeline_recipe %>%
               step_unknown(all_of(var1)) %>%
@@ -3925,7 +4043,8 @@ shinyServer(function(input, output, session) {
             #Making note that these have already been encoded
             interaction_encoded_cats <- unique(c(interaction_encoded_cats, var1))
             
-          } else if (var1_is_cat && var2_is_cat) {
+          } 
+          else if (var1_is_cat && var2_is_cat) {
             
             pipeline_recipe <- pipeline_recipe %>%
               step_unknown(all_of(c(var1, var2))) %>%
@@ -3944,12 +4063,74 @@ shinyServer(function(input, output, session) {
           rows_keep <- step$additional_info
           pipeline_recipe <- pipeline_recipe %>% step_filter(!(CODE %in% rows_keep), skip = FALSE)
         }
+        else if (method == "shadow_var"){
+          source_col <- cols[1]
+          source_sym <- rlang::sym(source_col)
+          
+          op <- step$additional_info$operation
+          val <- as.numeric(step$additional_info$value)
+          
+          new_col <- paste0(source_col, "_shadow")
+          new_col_sym <- rlang::sym(new_col)
+          
+          if (op == ">") {
+            pipeline_recipe <- pipeline_recipe %>%
+              step_mutate(
+                !!new_col_sym := dplyr::if_else(
+                  is.na(!!source_sym),
+                  NA_real_,
+                  ifelse(!!source_sym > val, 1, 0)
+                )
+              )
+            
+          }
+          else if (op == "<") {
+            pipeline_recipe <- pipeline_recipe %>%
+              step_mutate(
+                !!new_col_sym := dplyr::if_else(
+                  is.na(!!source_sym),
+                  NA_real_,
+                  ifelse(!!source_sym < val, 1, 0)
+                )
+              )
+            
+          } 
+          else if (op == "=") {
+            pipeline_recipe <- pipeline_recipe %>%
+              step_mutate(
+                !!new_col_sym := dplyr::if_else(
+                  is.na(!!source_sym),
+                  NA_real_,
+                  ifelse(!!source_sym == val, 1, 0)
+                )
+              )
+            
+          } 
+          else if (op == "is na"){
+            na_col <- paste0(source_col, "_missing")
+            na_col_sym <- rlang::sym(na_col)
+            
+            pipeline_recipe <- pipeline_recipe %>%
+              step_mutate(
+                !!na_col_sym := ifelse(is.na(!!source_sym), 1, 0) 
+              ) 
+          }
+        }
+        else if (method == "remove_var"){
+          pipeline_recipe <- pipeline_recipe %>% step_rm(all_of(!!cols))
+          
+          removed_cats <- c(
+            removed_cats,
+            intersect(cols, c("GOVERN_TYPE", "HEALTHCARE_BASIS"))
+            )
+          
+        }
       }
       
       #Encoding cat vars if they haven't already through interaction term calculations
       remaining_nominals <- setdiff(
         names(df)[sapply(df, is.factor)],
-        c("CODE", "OBS_TYPE", interaction_encoded_cats)
+        c("CODE", "OBS_TYPE", interaction_encoded_cats, removed_cats)
       )
       
       if (length(remaining_nominals) > 0) {
@@ -3961,8 +4142,8 @@ shinyServer(function(input, output, session) {
       # Prep and bake the recipe on the modified dataframe
       prepped_recipe <- prep(pipeline_recipe, training = df)
 
-
       
+
       #Returning list with transformed df and recipe
       list(
         df  = juice(prepped_recipe),
@@ -4115,6 +4296,17 @@ shinyServer(function(input, output, session) {
               else if (method == "remove_obs"){
                 contextual_info <- paste0("| ", length(step$additional_info), " Obs")
               }
+              else if (method == "shadow_var"){
+                op <- step$additional_info$operation
+                val <- step$additional_info$value
+                if (op != "is na"){
+                  contextual_info <- paste0("| ", cols[1], " ", op, " ", val)
+                }
+                else {contextual_info <- paste0("| ", cols[1], " ", op)}
+              }             
+              else if (method == "remove_var"){
+                contextual_info <- paste0("| Remove: ", paste(cols, collapse = ", "))
+              }
               else{contextual_info <- NULL}
 
               tags$li(
@@ -4249,6 +4441,7 @@ shinyServer(function(input, output, session) {
       pipelines <- saved_pipelines()
       req(length(pipelines) > 0)
       
+
       pipeline <- pipelines[[input$selected_pipeline_model]]
       
       tagList(
@@ -4261,24 +4454,16 @@ shinyServer(function(input, output, session) {
     # Saving model result
     model_result <- reactiveVal(NULL)
     
-    reactive_model <-  reactive({
+    reactive_model <- reactive({
       pipeline <- selected_pipeline()
       req(pipeline)
-      #setting seed for consistency
       set.seed(123)
       
-      #Extracting pipeline recipe for model
-      pipeline_recipe  <- pipeline$recipe  
-      
-      #Final step removing any observations with NA values so none make it to GLM
-      pipeline_recipe <- pipeline_recipe %>%
+      pipeline_recipe <- pipeline$recipe %>%
         step_naomit(all_predictors(), all_outcomes(), skip = FALSE)
       
       prepped <- prep(pipeline_recipe, training = train_data)
       
-      #Extracting scale/center if they been applied for later use
-      
-      #Step index in reverse order 
       step_index <- rev(seq_along(prepped$steps))
       
       standardize_info <- lapply(step_index, function(i) {
@@ -4304,80 +4489,134 @@ shinyServer(function(input, output, session) {
         }
       })
       
-      #Only keeping non-null values
       standardize_info <- Filter(Negate(is.null), standardize_info)
-      
       
       train_processed <- juice(prepped)
       test_processed  <- bake(prepped, new_data = test_data)
       
+      train_y_original <- train_processed$DEATH_RATE
+      test_y_original  <- test_processed$DEATH_RATE
+      
+      if (isTRUE(input$log_transform_outcome)) {
+        train_processed$DEATH_RATE <- log1p(train_processed$DEATH_RATE)
+        test_processed$DEATH_RATE  <- log1p(test_processed$DEATH_RATE)
+      }
+      
+      train_processed$DEATH_RATE_original <- train_y_original
+      test_processed$DEATH_RATE_original  <- test_y_original
+      
+      case_weights <- NULL
+      if (isTRUE(input$weight_extremes)) {
+        threshold <- quantile(
+          train_y_original,
+          probs = input$extreme_quantile,
+          na.rm = TRUE
+        )
+        
+        case_weights <- ifelse(
+          train_y_original >= threshold,
+          input$extreme_weight,
+          1
+        )
+      }
       
       ctrl <- trainControl(
-        method          = "cv",
-        number          = input$cv_folds,
+        method = "cv",
+        number = input$cv_folds,
         savePredictions = "final",
-        verboseIter     = FALSE
+        verboseIter = FALSE
       )
       
-      # Optional log transform on outcome
-      # if (input$log_transform_outcome) {
-      #   pipeline_recipe <- pipeline_recipe %>% step_log(all_outcomes(), base = 10)
-      # }
-      
       model <- caret::train(
-        DEATH_RATE ~ . - CODE - OBS_TYPE,
-        data      = train_processed,     
-        method    = "glmnet",
+        DEATH_RATE ~ . - CODE - OBS_TYPE - DEATH_RATE_original,
+        data = train_processed,
+        method = "glmnet",
         trControl = ctrl,
         tuneLength = input$glmnet_tune_length,
-        tuneGrid  = expand.grid(
-          alpha  = seq(0, 1, by = 0.1),
+        tuneGrid = expand.grid(
+          alpha = seq(0, 1, by = 0.1),
           lambda = 10^seq(-4, 1, length.out = input$glmnet_tune_length)
-        )
+        ),
+        weights = case_weights
       )
       
       test_preds <- predict(model, newdata = test_processed)
-      test_performance <- postResample(pred = test_preds, obs = test_processed$DEATH_RATE)
-
-      #Extracting train predictions for best model
+      
+      if (isTRUE(input$log_transform_outcome)) {
+        test_preds_eval <- expm1(test_preds)
+        test_actual_eval <- test_y_original
+      } else {
+        test_preds_eval <- test_preds
+        test_actual_eval <- test_y_original
+      }
+      
+      test_performance <- postResample(
+        pred = test_preds_eval,
+        obs  = test_actual_eval
+      )
+      
       best_alpha  <- model$bestTune$alpha
       best_lambda <- model$bestTune$lambda
       
       train_cv_preds <- model$pred %>%
-        dplyr::filter(
-          alpha  == best_alpha,
-          lambda == best_lambda
-        )
+        dplyr::filter(alpha == best_alpha, lambda == best_lambda)
+      
+      if (isTRUE(input$log_transform_outcome)) {
+        train_cv_preds <- train_cv_preds %>%
+          dplyr::mutate(
+            pred_eval = expm1(pred),
+            obs_eval  = expm1(obs)
+          )
+      } else {
+        train_cv_preds <- train_cv_preds %>%
+          dplyr::mutate(
+            pred_eval = pred,
+            obs_eval  = obs
+          )
+      }
       
       train_processed <- train_processed %>%
         dplyr::mutate(rowIndex = dplyr::row_number()) %>%
         dplyr::left_join(
-          train_cv_preds %>% dplyr::select(rowIndex, pred),
+          train_cv_preds %>% dplyr::select(rowIndex, pred_eval, obs_eval),
           by = "rowIndex"
+        ) %>%
+        dplyr::rename(
+          Pred_DeathRate = pred_eval,
+          Actual_DeathRate = obs_eval
         )
       
-      train_perf <- postResample(pred = train_processed$pred, obs = train_processed$DEATH_RATE)
+      train_perf <- postResample(
+        pred = train_processed$Pred_DeathRate,
+        obs  = train_processed$Actual_DeathRate
+      )
       
-      #Coefficient dataframe for model summary
+      test_processed <- test_processed %>%
+        dplyr::mutate(
+          Pred_DeathRate = test_preds_eval,
+          Actual_DeathRate = test_actual_eval
+        )
+      
       coefs <- coef(model$finalModel, s = best_lambda)
       
       coef_df <- data.frame(
         Variable = rownames(coefs),
         Coefficient = as.numeric(coefs)
       )
-
+      
       list(
         model = model,
         performance = test_performance,
-        test_preds = test_preds,
-        test_actual = test_processed$DEATH_RATE,
+        test_preds = test_preds_eval,
+        test_actual = test_actual_eval,
         train_processed = train_processed,
         test_processed = test_processed,
         train_perf = train_perf,
         coef_df = coef_df,
         best_alpha = best_alpha,
         best_lambda = best_lambda,
-        standardize_info = standardize_info #for use in datatable if user wishes to reverse scaling/centering
+        standardize_info = standardize_info,
+        case_weights = case_weights
       )
     })
     
@@ -4463,7 +4702,7 @@ shinyServer(function(input, output, session) {
       ggplot(df_plot, aes(x = Actual, y = Pred)) +
         geom_point(alpha = 0.6) +
         geom_abline(slope = 1, intercept = 0, color = "red") +
-        labs(title = "Actual vs Predicted",
+        labs(title = paste0("Actual vs Predicted | ", input$selected_pipeline_model),
              x = "Actual", 
              y = "Predicted",
              subtitle = paste0(nrow(df_plot)," / ", nrow(test_data), " Test Observations | ", round(result$performance[[2]], 2))) +
@@ -4583,7 +4822,7 @@ shinyServer(function(input, output, session) {
           geom_col(aes(fill = Coefficient > 0)) +
           coord_flip() +
           labs(
-            title = "Model Coefficients",
+            title = paste0("Model Coefficients | ", input$selected_pipeline_model),
             x = NULL,
             y = "Coefficient Value"
           ) +
@@ -4607,7 +4846,7 @@ shinyServer(function(input, output, session) {
         ggplot(imp_df, aes(x = reorder(Variable, Importance), y = Importance)) +
           geom_col(fill = "steelblue") +
           coord_flip() +
-          labs(title = "Variable Importance", x = NULL, y = "Importance") +
+          labs(title = paste0("Variable Importance | ", input$selected_pipeline_model), x = NULL, y = "Importance") +
           eda_plot_theme()
       )
     })
@@ -4630,8 +4869,8 @@ shinyServer(function(input, output, session) {
             test_data %>% select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
             by = "CODE"
           )
-        actual <- result$test_actual
-        preds  <- result$test_preds
+        actual <- result$test_processed$Actual_DeathRate
+        preds  <- result$test_processed$Pred_DeathRate
         residuals   <- actual - preds
         
       } else if (selected_data == "Train"){
@@ -4642,29 +4881,33 @@ shinyServer(function(input, output, session) {
             train_data %>% select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
             by = "CODE"
           )
-        actual <- df$DEATH_RATE
-        preds  <- df$pred
+        actual <- df$Actual_DeathRate
+        preds  <- df$Pred_DeathRate
         residuals   <- actual - preds
         
       } else if (selected_data == "Both"){
-        #Training data
-        train <- result$train_processed %>% select(DEATH_RATE, pred, CODE)
-        #Test data
-        test <- result$test_processed %>%
-          dplyr::select(DEATH_RATE, CODE) %>%
-          dplyr::mutate(
-            pred = as.numeric(result$test_preds)
+        train <- result$train_processed %>%
+          dplyr::transmute(
+            CODE = CODE,
+            Actual_DeathRate = Actual_DeathRate,
+            Pred_DeathRate = Pred_DeathRate
           )
-        #Full dataset with predictions, observations and CODE 
-        df <- rbind(train, test)
         
-        df <- df %>%
-          left_join(
-            data %>% select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
+        test <- result$test_processed %>%
+          dplyr::transmute(
+            CODE = CODE,
+            Actual_DeathRate = Actual_DeathRate,
+            Pred_DeathRate = Pred_DeathRate
+          )
+        
+        df <- dplyr::bind_rows(train, test) %>%
+          dplyr::left_join(
+            data %>% dplyr::select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
             by = "CODE"
           )
-        actual <- df$DEATH_RATE
-        preds  <- df$pred
+        
+        actual <- df$Actual_DeathRate
+        preds  <- df$Pred_DeathRate
         residuals <- actual - preds
       }
       
@@ -4730,30 +4973,38 @@ shinyServer(function(input, output, session) {
       if (selected_data == "Test"){
       plot_data <- result$test_processed
       
-      actual <- result$test_actual 
-      preds <-result$test_preds
+      actual <- result$test_processed$Actual_DeathRate
+      preds  <- result$test_processed$Pred_DeathRate
       
       resid <- actual - preds
       
       } else if (selected_data == "Train"){
         plot_data <- result$train_processed
         
-        actual <- result$train_processed$DEATH_RATE 
-        preds <-result$train_processed$pred
+        actual <- result$train_processed$Actual_DeathRate
+        preds  <- result$train_processed$Pred_DeathRate
         
         resid <- actual - preds
         
       } else if (selected_data == "Both"){
-        #Training data
-        train <- result$train_processed %>% select(DEATH_RATE, pred, CODE)
-        #Test data
+        # Training data
+        train <- result$train_processed %>%
+          dplyr::transmute(
+            CODE = CODE,
+            DEATH_RATE = Actual_DeathRate,
+            pred = Pred_DeathRate
+          )
+        
+        # Test data
         test <- result$test_processed %>%
-               dplyr::select(DEATH_RATE, CODE) %>%
-               dplyr::mutate(
-                     pred = as.numeric(result$test_preds)
-                 )
-        #Full dataset with predictions, observations and CODE 
-        plot_data <- rbind(train, test)
+          dplyr::transmute(
+            CODE = CODE,
+            DEATH_RATE = Actual_DeathRate,
+            pred = Pred_DeathRate
+          )
+        
+        # Full dataset with predictions, observations and CODE
+        plot_data <- dplyr::bind_rows(train, test)
         
         resid <- plot_data$DEATH_RATE - plot_data$pred
       }
@@ -4804,16 +5055,34 @@ shinyServer(function(input, output, session) {
         ) +
         eda_plot_theme()
       
-      p_box <- ggplot(plot_df, aes(x = "", y = Residual)) +
-        geom_boxplot(outlier.shape = NA, width = 0.25) +
+      lower_whisker <- min(plot_df$Residual[plot_df$Residual >= lower_bound], na.rm = TRUE)
+      upper_whisker <- max(plot_df$Residual[plot_df$Residual <= upper_bound], na.rm = TRUE)
+      med <- median(plot_df$Residual, na.rm = TRUE)
+      
+      box_df <- data.frame(
+        xmin = "",
+        ymin = lower_whisker,
+        lower = q1,
+        middle = med,
+        upper = q3,
+        ymax = upper_whisker
+      )
+      
+      p_box <- ggplot() +
+        geom_boxplot(data = box_df,
+                     aes(x = xmin, ymin = ymin, lower = lower, middle = middle, upper = upper, ymax = ymax),
+                     stat = "identity",
+                     width = 0.25
+        ) +
         geom_point(
           data = subset(plot_df, Outlier),
+          aes(x = "", y = Residual),
           colour = "red",
           position = position_jitter(width = 0.05)
         ) +
         ggrepel::geom_text_repel(
           data = subset(plot_df, Outlier),
-          aes(label = Label),
+          aes(x = "", y = Residual, label = Label),
           max.overlaps = 20,
           na.rm = TRUE
         ) +
@@ -4859,97 +5128,81 @@ shinyServer(function(input, output, session) {
     #Plot output of residuals by predictor for selected model
     output$resid_predictor <- renderPlot({
       result <- reactive_model()
-      final_model <- result$model$finalModel
       predictor <- input$resid_predictor_selected
-      
-      #Different data depending on selecting dataset
-      selected_data <-  input$outlier_display_data
+      selected_data <- input$outlier_display_data
       
       if (selected_data == "Test"){
-        plot_data <- result$test_processed %>% 
-          select(CODE, DEATH_RATE, all_of(predictor)) %>% 
-          mutate(pred = result$test_preds,
-                 resid = DEATH_RATE - pred)
+        plot_data <- result$test_processed %>%
+          dplyr::select(CODE, Actual_DeathRate, Pred_DeathRate, all_of(predictor)) %>%
+          dplyr::mutate(
+            resid = Actual_DeathRate - Pred_DeathRate
+          )
         
-
       } else if (selected_data == "Train"){
-        plot_data <- result$train_processed %>% 
-          select(CODE, DEATH_RATE, pred, all_of(predictor)) %>% 
-          mutate(resid = DEATH_RATE - pred)
+        plot_data <- result$train_processed %>%
+          dplyr::select(CODE, Actual_DeathRate, Pred_DeathRate, all_of(predictor)) %>%
+          dplyr::mutate(
+            resid = Actual_DeathRate - Pred_DeathRate
+          )
         
       } else if (selected_data == "Both"){
-        #Training data
-        train <- result$train_processed %>% select(DEATH_RATE, pred, CODE, all_of(predictor))
-        #Test data
-        test <- result$test_processed %>%
-          dplyr::select(DEATH_RATE, CODE, all_of(predictor)) %>%
-          dplyr::mutate(
-            pred = as.numeric(result$test_preds)
-          )
-        #Full dataset with predictions, observations and CODE 
-        plot_data <- rbind(train, test)
+        train <- result$train_processed %>%
+          dplyr::select(CODE, Actual_DeathRate, Pred_DeathRate, all_of(predictor))
         
-        plot_data$resid <- plot_data$DEATH_RATE - plot_data$pred
+        test <- result$test_processed %>%
+          dplyr::select(CODE, Actual_DeathRate, Pred_DeathRate, all_of(predictor))
+        
+        plot_data <- dplyr::bind_rows(train, test) %>%
+          dplyr::mutate(
+            resid = Actual_DeathRate - Pred_DeathRate
+          )
       }
       
-      #IQR Range calculation
       q1 <- quantile(plot_data$resid, 0.25, na.rm = TRUE)
       q3 <- quantile(plot_data$resid, 0.75, na.rm = TRUE)
       iqr_val <- IQR(plot_data$resid, na.rm = TRUE)
       
       iqr_mult <- input$resid_predictor_iqr_mult
       
-      #Lower/upper bound calculation
       lower_bound <- q1 - iqr_mult * iqr_val
       upper_bound <- q3 + iqr_mult * iqr_val
       
-      #Saving labels for datapoints that are outliers
       plot_data$Outlier <- plot_data$resid < lower_bound | plot_data$resid > upper_bound
       plot_data$Label <- ifelse(plot_data$Outlier, as.character(plot_data$CODE), NA)
       
-      #Joining cat vars to plot data
-      plot_data <-  plot_data %>%
-        left_join(
-          data %>% select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
+      plot_data <- plot_data %>%
+        dplyr::left_join(
+          data %>% dplyr::select(CODE, GOVERN_TYPE, HEALTHCARE_BASIS),
           by = "CODE"
         )
       
-      #Colour group
       if (input$resid_predict_outlier_colour){
-        plot_data$Colour <- ifelse(plot_data$Outlier, 'Outlier', 'Non-Outlier')
-      } else {plot_data$Colour <- " "}
+        plot_data$Colour <- ifelse(plot_data$Outlier, "Outlier", "Non-Outlier")
+      } else {
+        plot_data$Colour <- " "
+      }
       
-      #Plot for numeric variables
       if (length(unique(plot_data[[predictor]])) != 2){
-      plot <- ggplot(plot_data, 
-                     aes(x = .data[[predictor]],
-                         y = resid) ) +
-        geom_point(aes(colour = Colour),
-          alpha = 0.7) +
-        geom_hline(yintercept = 0, linetype = "dashed") +
-        eda_plot_theme()
-      
-      #Adding smooth line if input is checked
-      if (input$resid_predict_smooth_line){plot <-  plot + geom_smooth(se = FALSE, colour = "#F4A6A6")}
-      
-      #Option for facet wrap
-      if(input$interaction_cat_var != "None"){
+        plot <- ggplot(plot_data, aes(x = .data[[predictor]], y = resid)) +
+          geom_point(aes(colour = Colour), alpha = 0.7) +
+          geom_hline(yintercept = 0, linetype = "dashed") +
+          eda_plot_theme()
         
-        plot <- plot  + facet_wrap(~ .data[[input$interaction_cat_var]]) +
-          theme(
-            panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
-          )
-        
+        if (input$resid_predict_smooth_line){
+          plot <- plot + geom_smooth(se = FALSE, colour = "#F4A6A6")
         }
-      
-      #If predictor column is binary then plot for encoded categorical variable
-      } else if (length(unique(plot_data[[predictor]])) == 2){
-        plot <- ggplot(plot_data, 
-                       aes(x = as.factor(.data[[predictor]]),
-                           y = resid)) +
-          geom_boxplot(outlier.shape = NA,
-                       width = 0.25,
-                       fill = "lightblue") +
+        
+        if (input$interaction_cat_var != "None"){
+          plot <- plot +
+            facet_wrap(~ .data[[input$interaction_cat_var]]) +
+            theme(
+              panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8)
+            )
+        }
+        
+      } else {
+        plot <- ggplot(plot_data, aes(x = as.factor(.data[[predictor]]), y = resid)) +
+          geom_boxplot(outlier.shape = NA, width = 0.25, fill = "lightblue") +
           geom_point(
             data = subset(plot_data, Outlier),
             colour = "red",
@@ -4959,13 +5212,13 @@ shinyServer(function(input, output, session) {
       }
       
       if (input$resid_predict_label){
-       plot <- plot +
-         geom_text_repel(
-          data = subset(plot_data, Outlier),
-          aes(label = Label),
-          max.overlaps = 20,
-          na.rm = TRUE
-        )
+        plot <- plot +
+          ggrepel::geom_text_repel(
+            data = subset(plot_data, Outlier),
+            aes(label = Label),
+            max.overlaps = 20,
+            na.rm = TRUE
+          )
       }
       
       plot +
@@ -4973,21 +5226,37 @@ shinyServer(function(input, output, session) {
           title = paste("Residuals vs", predictor, " | ", glm_selected_data_title()),
           x = predictor,
           y = "Residual"
-        ) 
-})
+        )
+    })
     #Helper function to get data
     get_glm_data <- function(model){
-      selected_data <-  input$outlier_display_data
+      selected_data <- input$outlier_display_data
       
-      if (selected_data == 'Test'){
-        data <- model$test_processed %>% select(-OBS_TYPE) %>% mutate(Pred_DeathRate = model$test_preds)
-      } else if (selected_data == 'Train'){
-        data <- model$train_processed %>% select(-c(OBS_TYPE, rowIndex)) %>% rename(Pred_DeathRate= pred)
-      } else if (selected_data == 'Both'){
-        train <- model$train_processed %>% select(-rowIndex) %>% rename(Pred_DeathRate= pred)
-        test <- model$test_processed %>% mutate(Pred_DeathRate = model$test_preds)
-        data <- rbind(test, train) 
+      if (selected_data == "Test") {
+        data <- model$test_processed %>%
+          dplyr::select(-OBS_TYPE) %>%
+          dplyr::mutate(
+            DEATH_RATE = Actual_DeathRate
+          )
+        
+      } else if (selected_data == "Train") {
+        data <- model$train_processed %>%
+          dplyr::select(-c(OBS_TYPE, rowIndex)) %>%
+          dplyr::mutate(
+            DEATH_RATE = Actual_DeathRate
+          )
+        
+      } else if (selected_data == "Both") {
+        train <- model$train_processed %>%
+          dplyr::select(-rowIndex) %>%
+          dplyr::mutate(DEATH_RATE = Actual_DeathRate)
+        
+        test <- model$test_processed %>%
+          dplyr::mutate(DEATH_RATE = Actual_DeathRate)
+        
+        data <- rbind(test, train)
       }
+      
       data
     }
     
@@ -5076,12 +5345,19 @@ shinyServer(function(input, output, session) {
     #Exporting glm table if needed
     output$glm_data_export <- downloadHandler(
       filename = function() {
-        # Dynamically generate the filename
         paste("Ass2_Shiny_Export-", Sys.Date(), ".csv")
       },
-
       content = function(file){
-        write.csv(output$glm_data, file)
+        model <- reactive_model()
+        data <- get_glm_data(model)
+        selected_vars <- input$glm_data_vars
+        
+        data <- data %>%
+          dplyr::select(all_of(c(selected_vars, "DEATH_RATE", "Pred_DeathRate"))) %>%
+          dplyr::mutate(Residual = DEATH_RATE - Pred_DeathRate) %>%
+          dplyr::relocate(c(DEATH_RATE, Pred_DeathRate, Residual), .before = everything())
+        
+        write.csv(data, file, row.names = FALSE)
       }
     )
 # ===================================================================================

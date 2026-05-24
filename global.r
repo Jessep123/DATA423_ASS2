@@ -425,7 +425,9 @@ methods <- c(
   remove_outliers        = "Remove Multivariate Outliers",
   impute_manual_cat = "Impute — GOVERN_TYPE ",
   interaction_term = "Add Interaction Term ",
-  remove_obs = "Remove Specific Observations"
+  remove_obs = "Remove Specific Observations",
+  shadow_var = "Create Shadow Variable",
+  remove_var = "Remove Variable"
   
 )
 
@@ -439,26 +441,64 @@ train_numeric_cols <- names(train_data)[sapply(train_data, is.numeric)]
 #Excluding DEATH_RATE as it is outcome var and HEALTHCARE_COST as it is getting manually imputed
 train_numeric_cols_KNN <- setdiff(train_numeric_cols, c("DEATH_RATE", "HEALTHCARE_COST"))
 
-# Build default pipeline recipe
+# Hardcoded initial pipeline so don't have to constantly re enter pipeline steps
 default_recipe <- recipe(DEATH_RATE ~ ., data = train_data) %>%
   update_role("CODE",     new_role = "id") %>%
   update_role("OBS_TYPE", new_role = "split") %>%
-  # Step 1: Remove columns with more than 50% missing
+  
   step_filter_missing(all_predictors(), threshold = 0.5) %>%
-  # Step 2: Remove rows with more than 3 missing values
+  
+  step_mutate(HEALTHCARE_COST = ifelse(is.na(HEALTHCARE_COST), 0, HEALTHCARE_COST)) %>%
+  
+  # # Set VAX_RATE outliers beyond 4 SD to NA
+  step_mutate(
+    VAX_RATE = ifelse(
+      is.na(VAX_RATE),
+      NA_real_,
+      ifelse(
+        abs(VAX_RATE - mean(VAX_RATE, na.rm = TRUE)) > 4 * sd(VAX_RATE, na.rm = TRUE),
+        NA_real_,
+        VAX_RATE
+      )
+    )
+  ) %>%
+
   step_mutate(
     .row_na_count = rowSums(is.na(across(everything())))
   ) %>%
-  step_filter(.row_na_count <= 4, skip = FALSE) %>%
-  step_rm(.row_na_count) %>%
-  step_mutate(HEALTHCARE_COST = ifelse(is.na(HEALTHCARE_COST), 0, HEALTHCARE_COST)) %>%
-  step_nzv(all_predictors()) %>%
+  step_filter(.row_na_count <= 3, skip = FALSE) %>%
+  step_rm(.row_na_count) %>% 
+  
+
   step_impute_knn(all_numeric_predictors(), neighbors = 5) %>%
-  # step_lincomb(all_numeric_predictors()) %>%
+  
+
+  step_mutate(
+      POP_DENSITY_shadow := dplyr::if_else(
+      is.na(POP_DENSITY),
+      NA_real_,
+      ifelse(POP_DENSITY > 500, 1, 0)
+    )
+  ) %>%
+  
+
+  step_interact(terms = ~ GDP:VAX_RATE) %>%
+  
+
+  step_nzv(all_predictors()) %>%
+  
+  step_lincomb(all_numeric_predictors()) %>%
+  
   step_center(all_numeric_predictors()) %>%
-  step_scale(all_numeric_predictors()) %>%  
+
+  step_scale(all_numeric_predictors())  %>%
+  
 step_unknown(all_nominal_predictors()) %>%
+  
   step_dummy(all_nominal_predictors(), one_hot = TRUE)
+  
+  
+
 
 # Prep for preview
 default_prepped <- prep(default_recipe, training = train_data)
@@ -466,12 +506,84 @@ default_prepped <- prep(default_recipe, training = train_data)
 # Define steps for display in pipeline summary UI
 default_steps <- list(
   list(id = 1, method = "remove_na_cols",  cols = NULL,          additional_info = 50),
-  list(id = 2, method = "remove_na_rows",  cols = NULL,          additional_info = 3),
-  list(id = 3, method = "impute_manual",   cols = "HEALTHCARE_COST", additional_info = 0),
-  list(id = 4, method = "nzv",             cols = train_numeric_cols, additional_info = 0),
+  list(id = 2, method = "impute_manual",   cols = "HEALTHCARE_COST", additional_info = 0),
+  list(id = 3, method = "replace_outliers",   cols = "VAX_RATE", additional_info = 4, outlier_criteria = "Standard Deviation"),
+  list(id = 4, method = "remove_na_rows",  cols = NULL,          additional_info = 3),
   list(id = 5, method = "impute_knn",      cols = train_numeric_cols_KNN,  additional_info = 5),
-  # list(id = 6, method = "lincomb",         cols = train_numeric_cols, additional_info = 0),
-  list(id = 6, method = "center",          cols = train_numeric_cols,  additional_info = 0),
-  list(id = 7, method = "scale",           cols = train_numeric_cols,  additional_info = 0)
+  list(id = 6, method = "shadow_var",      cols = "POP_DENSITY",  additional_info = list(operation = ">", value = 500)),
+  list(id = 7, method = "interaction_term",      cols = c("GDP", "VAX_RATE"),  additional_info = TRUE),
+  list(id = 8, method = "nzv",             cols = train_numeric_cols, additional_info = 0),
+  list(id = 9, method = "lincomb",         cols = train_numeric_cols, additional_info = 0),
+  list(id = 10, method = "center",          cols = train_numeric_cols,  additional_info = 0),
+  list(id = 11, method = "scale",           cols = train_numeric_cols,  additional_info = 0)
+)
+# ============================================================================
+#   Adjusted  PROCESSING PIPELINE
+# ==========================================================================
+# Hardcoded adjusted pipeline so don't have to constantly re enter pipeline steps
+adjusted_recipe <- recipe(DEATH_RATE ~ ., data = train_data) %>%
+  update_role("CODE",     new_role = "id") %>%
+  update_role("OBS_TYPE", new_role = "split") %>%
+  
+  step_filter_missing(all_predictors(), threshold = 0.5) %>%
+  
+  step_mutate(HEALTHCARE_COST = ifelse(is.na(HEALTHCARE_COST), 0, HEALTHCARE_COST)) %>%
+  
+  # # Set VAX_RATE outliers beyond 4 SD to NA
+  step_mutate(
+    VAX_RATE = ifelse(
+      is.na(VAX_RATE),
+      NA_real_,
+      ifelse(
+        abs(VAX_RATE - mean(VAX_RATE, na.rm = TRUE)) > 4 * sd(VAX_RATE, na.rm = TRUE),
+        NA_real_,
+        VAX_RATE
+      )
+    )
+  ) %>%
+  
+  step_mutate(
+    .row_na_count = rowSums(is.na(across(everything())))
+  ) %>%
+  step_filter(.row_na_count <= 3, skip = FALSE) %>%
+  step_rm(.row_na_count) %>% 
+  
+  step_mutate(
+    POP_DENSITY_missing = ifelse(is.na(POP_DENSITY), 1, 0)
+  ) %>%
+  
+  
+  step_impute_knn(all_numeric_predictors(), neighbors = 5) %>%
+  
+  
+  step_nzv(all_predictors()) %>%
+  
+  step_lincomb(all_numeric_predictors()) %>%
+  
+  step_center(all_numeric_predictors()) %>%
+  
+  step_scale(all_numeric_predictors())  %>%
+  
+  step_unknown(all_nominal_predictors()) %>%
+  
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+
+
+# Prep for preview
+adjusted_prepped <- prep(adjusted_recipe , training = train_data)
+
+# Define steps for display in pipeline summary UI
+adjusted_steps <- list(
+  list(id = 1, method = "remove_na_cols",  cols = NULL,          additional_info = 50),
+  list(id = 2, method = "impute_manual",   cols = "HEALTHCARE_COST", additional_info = 0),
+  list(id = 3, method = "replace_outliers",   cols = "VAX_RATE", additional_info = 4, outlier_criteria = "Standard Deviation"),
+  list(id = 4, method = "remove_na_rows",  cols = NULL,          additional_info = 3),
+  list(id = 5, method = "shadow_var",      cols = "POP_DENSITY",  additional_info = list(operation = "is na", value = 500)),
+  list(id = 6, method = "impute_knn",      cols = train_numeric_cols_KNN,  additional_info = 5),
+  list(id = 7, method = "nzv",             cols = train_numeric_cols, additional_info = 0),
+  list(id = 8, method = "lincomb",         cols = train_numeric_cols, additional_info = 0),
+  list(id = 9, method = "center",          cols = train_numeric_cols,  additional_info = 0),
+  list(id = 10, method = "scale",           cols = train_numeric_cols,  additional_info = 0)
 )
 
